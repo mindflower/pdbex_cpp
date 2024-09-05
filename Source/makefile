@@ -1,5 +1,6 @@
-VSINSTALLDIR="L:\flash2G_my\syser\pdb\tmp"
+#VSINSTALLDIR="L:\flash2G_my\syser\pdb\tmp"
 #CFLAGS= /MT
+CFLAGS= /EHsc
 LFLAGS= /MANIFEST:NO
 #DEBUG= NO
 
@@ -23,14 +24,10 @@ LIBS = \
     oleaut32.lib
 
 
-#CFLAGS = $(CFLAGS) -MD$(D) -I"$(VSINSTALLDIR)\DIA SDK 2013\include"
-CFLAGS = $(CFLAGS) -MT$(D) -I"$(VSINSTALLDIR)\DIA SDK 2014\include"
+CFLAGS = $(CFLAGS) -MT$(D) -I"$(VSINSTALLDIR)\DIA SDK\include"
 
-#PCHNAME  = $(ODIR)\stdafx.pch
-#PCHHEADER = stdafx.h
-#PCHFLAGS = -Yu$(PCHHEADER) -Fp$(PCHNAME)
 CFLAGS   = $(CFLAGS)   -nologo -c -Fd$(ODIR)\ -W3
-LFLAGS   = $(LFLAGS)   -map -debug -PDB:$(ODIR)\dia2dump.pdb "-libpath:$(VSINSTALLDIR)\DIA SDK 2014\lib"
+LFLAGS   = $(LFLAGS)   -map -debug -PDB:$(ODIR)\pdbex_cpp.pdb "-libpath:$(VSINSTALLDIR)\DIA SDK\lib"
 
 
 !if "$(VERBOSE)" == "1"
@@ -46,17 +43,17 @@ OBJS = \
 
 ##### Inference Rules
 
-all : $(ODIR)\dia2dump.exe
+all : $(ODIR)\pdbex_cpp.exe
 
 #use as prefix for cl
 #D:\LLVM-9.0.0-win32\bin\clang-
 #D:\LLVM-9.0.0-win64\bin\clang-
 
 {}.cpp{$(ODIR)\}.obj::
-    cl $(CFLAGS) /std:c++latest $(MPBUILDFLAGS) $(PCHFLAGS) -Fo$(ODIR)\ -FR$(ODIR)\ $<
+    cl $(CFLAGS) /std:c++20 $(MPBUILDFLAGS) $(PCHFLAGS) -Fo$(ODIR)\ -FR$(ODIR)\ $<
 
-$(ODIR)\dia2dump.exe : $(ODIR) $(PCHNAME) $(OBJS)
-    link -out:$(ODIR)\dia2dump.exe $(OBJS) $(LFLAGS) $(LIBS)
+$(ODIR)\pdbex_cpp.exe : $(ODIR) $(PCHNAME) $(OBJS)
+    link -out:$(ODIR)\pdbex_cpp.exe $(OBJS) $(LFLAGS) $(LIBS)
 
 $(ODIR):
     -md $(ODIR)

@@ -7,148 +7,147 @@
 #include <stack>
 
 template <typename MEMBER_DEFINITION_TYPE>
-class PDBSymbolVisitor
-	: public PDBSymbolVisitorBase
+class PDBSymbolVisitor : public PDBSymbolVisitorBase
 {
 public:
-	PDBSymbolVisitor(PDBReconstructorBase* ReconstructVisitor);
+    PDBSymbolVisitor(PDBReconstructorBase* reconstructVisitor);
 
-	void Run(const SYMBOL* Symbol);
+    void Run(const Symbol& symbol);
 protected:
 
-	void Visit(const SYMBOL* Symbol) override;
-	void VisitBaseType(const SYMBOL* Symbol) override;
-	void VisitEnumType(const SYMBOL* Symbol) override;
-	void VisitTypedefType(const SYMBOL* Symbol) override;
-	void VisitPointerType(const SYMBOL* Symbol) override;
-	void VisitArrayType(const SYMBOL* Symbol) override;
-	void VisitFunctionType(const SYMBOL* Symbol) override;
-	void VisitFunctionArgType(const SYMBOL* Symbol) override;
-	void VisitUdt(const SYMBOL* Symbol) override;
-	void VisitOtherType(const SYMBOL* Symbol) override;
-	void VisitEnumField(const SYMBOL_ENUM_FIELD* EnumField) override;
-	void VisitUdtField(const SYMBOL_UDT_FIELD* UdtField) override;
-	void VisitUdtFieldEnd(const SYMBOL_UDT_FIELD* UdtField) override;
-	void VisitUdtFieldBitFieldEnd(const SYMBOL_UDT_FIELD* UdtField) override;
+    void Visit(const Symbol& symbol) override;
+    void VisitBaseType(const Symbol& symbol) override;
+    void VisitEnumType(const Symbol& symbol) override;
+    void VisitTypedefType(const Symbol& symbol) override;
+    void VisitPointerType(const Symbol& symbol) override;
+    void VisitArrayType(const Symbol& symbol) override;
+    void VisitFunctionType(const Symbol& symbol) override;
+    void VisitFunctionArgType(const Symbol& symbol) override;
+    void VisitUdt(const Symbol& symbol) override;
+    void VisitOtherType(const Symbol& symbol) override;
+    void VisitEnumField(const SymbolEnumField& enumField) override;
+    void VisitUdtField(const SymbolUdtField& udtField) override;
+    void VisitUdtFieldEnd(const SymbolUdtField& udtField) override;
+    void VisitUdtFieldBitFieldEnd(const SymbolUdtField& udtField) override;
 
 private:
 
-	struct AnonymousUdt
-	{
-		AnonymousUdt(UdtKind Kind,
-			const SYMBOL_UDT_FIELD* First, const SYMBOL_UDT_FIELD* Last,
-			DWORD Size = 0,
-			DWORD MemberCount = 0
-			)
-		{
-			this->Kind          = Kind;
-			this->First         = First;
-			this->Last          = Last;
-			this->Size          = Size;
-			this->MemberCount   = MemberCount;
-		}
+    struct AnonymousUdt
+    {
+        AnonymousUdt(UdtKind kind,
+                     const SymbolUdtField* first, const SymbolUdtField* last,
+                     DWORD size = 0,
+                     DWORD memberCount = 0
+        )
+        {
+            this->kind = kind;
+            this->first = first;
+            this->last = last;
+            this->size = size;
+            this->memberCount = memberCount;
+        }
 
-		const SYMBOL_UDT_FIELD* First;
-		const SYMBOL_UDT_FIELD* Last;
-		DWORD Size;
-		DWORD MemberCount;
-		UdtKind Kind;
-	};
+        const SymbolUdtField* first;
+        const SymbolUdtField* last;
+        DWORD size;
+        DWORD memberCount;
+        UdtKind kind;
+    };
 
-	struct BitFieldRange
-	{
-		const SYMBOL_UDT_FIELD* First;
-		const SYMBOL_UDT_FIELD* Last;
+    struct BitFieldRange
+    {
+        const SymbolUdtField* first;
+        const SymbolUdtField* last;
 
-		BitFieldRange()	: First(nullptr), Last(nullptr)
-		{
-		}
+        BitFieldRange() : first(nullptr), last(nullptr)
+        {
+        }
 
-		void Clear()
-		{
-			First = nullptr;
-			Last = nullptr;
-		}
+        void Clear()
+        {
+            first = nullptr;
+            last = nullptr;
+        }
 
-		bool HasValue() const
-		{
-			return /*First != nullptr &&*/
-			       Last  != nullptr;
-		}
-	};
+        bool HasValue() const
+        {
+            return /*First != nullptr &&*/
+                last != nullptr;
+        }
+    };
 
-	struct UdtFieldContext
-	{
-		UdtFieldContext(const SYMBOL_UDT_FIELD* UdtField, BOOL RespectBitFields = TRUE)
-		{
-			this->UdtField = UdtField;
+    struct UdtFieldContext
+    {
+        UdtFieldContext(const SymbolUdtField* udtField, BOOL respectBitFields = TRUE)
+        {
+            this->udtField = udtField;
 
-			PreviousUdtField = &UdtField[-1];
-			CurrentUdtField  = &UdtField[ 0];
-			NextUdtField     = UdtField->Parent->u.Udt.FindFieldNext(UdtField);
+            previousUdtField = &udtField[-1];
+            currentUdtField = &udtField[0];
+            nextUdtField = std::get<SymbolUdt>(udtField->parent->variant).FindFieldNext(udtField);
 
-			this->RespectBitFields = RespectBitFields;
+            this->respectBitFields = respectBitFields;
 
-			if (RespectBitFields)
-			{
-				NextUdtField = GetNextUdtFieldWithRespectToBitFields(UdtField);
-			}
-		}
+            if (respectBitFields)
+            {
+                nextUdtField = GetNextUdtFieldWithRespectToBitFields(udtField);
+            }
+        }
 
-		bool IsFirst() const { return PreviousUdtField < UdtField->Parent->u.Udt.FieldFirst();	}
-		bool IsLast() const { return NextUdtField == UdtField->Parent->u.Udt.FieldLast(); }
+        bool IsFirst() const { return previousUdtField < std::get<SymbolUdt>(udtField->parent->variant).FieldFirst(); }
+        bool IsLast() const { return nextUdtField == std::get<SymbolUdt>(udtField->parent->variant).FieldLast(); }
 
-		bool GetNext()
-		{
-			PreviousUdtField = CurrentUdtField;
-			CurrentUdtField  = NextUdtField;
-			NextUdtField     = UdtField->Parent->u.Udt.FindFieldNext(CurrentUdtField);
+        bool GetNext()
+        {
+            previousUdtField = currentUdtField;
+            currentUdtField = nextUdtField;
+            nextUdtField = std::get<SymbolUdt>(udtField->parent->variant).FindFieldNext(currentUdtField);
 
-			if (RespectBitFields && IsLast() == false)
-			{
-				NextUdtField = GetNextUdtFieldWithRespectToBitFields(CurrentUdtField);
-			}
-			return IsLast() == false;
-		}
+            if (respectBitFields && IsLast() == false)
+            {
+                nextUdtField = GetNextUdtFieldWithRespectToBitFields(currentUdtField);
+            }
+            return IsLast() == false;
+        }
 
-		const SYMBOL_UDT_FIELD* UdtField;
+        const SymbolUdtField* udtField;
 
-		const SYMBOL_UDT_FIELD* PreviousUdtField;
-		const SYMBOL_UDT_FIELD* CurrentUdtField;
-		const SYMBOL_UDT_FIELD* NextUdtField;
+        const SymbolUdtField* previousUdtField;
+        const SymbolUdtField* currentUdtField;
+        const SymbolUdtField* nextUdtField;
 
-		BOOL RespectBitFields;
-	};
+        BOOL respectBitFields;
+    };
 
-	using AnonymousUdtStack = std::stack<std::shared_ptr<AnonymousUdt>>;
-	using ContextStack      = std::stack<std::shared_ptr<UdtFieldDefinitionBase>>;
-
-private:
-	void CheckForDataFieldPadding(const SYMBOL_UDT_FIELD* UdtField);
-	void CheckForBitFieldFieldPadding(const SYMBOL_UDT_FIELD* UdtField);
-	void CheckForAnonymousUnion(const SYMBOL_UDT_FIELD* UdtField);
-	void CheckForAnonymousStruct(const SYMBOL_UDT_FIELD* UdtField);
-	void CheckForEndOfAnonymousUdt(const SYMBOL_UDT_FIELD* UdtField);
-
-	std::shared_ptr<UdtFieldDefinitionBase> MemberDefinitionFactory();
-
-	void PushAnonymousUdt(std::shared_ptr<AnonymousUdt> Item);
-	void PopAnonymousUdt();
+    using AnonymousUdtStack = std::stack<std::shared_ptr<AnonymousUdt>>;
+    using ContextStack = std::stack<std::shared_ptr<UdtFieldDefinitionBase>>;
 
 private:
-	static const SYMBOL_UDT_FIELD* GetNextUdtFieldWithRespectToBitFields(const SYMBOL_UDT_FIELD* UdtField);
-	static bool Is64BitBasicType(const SYMBOL* Symbol);
+    void CheckForDataFieldPadding(const SymbolUdtField* udtField);
+    void CheckForBitFieldFieldPadding(const SymbolUdtField* udtField);
+    void CheckForAnonymousUnion(const SymbolUdtField* udtField);
+    void CheckForAnonymousStruct(const SymbolUdtField* udtField);
+    void CheckForEndOfAnonymousUdt(const SymbolUdtField* udtField);
+
+    std::shared_ptr<UdtFieldDefinitionBase> MemberDefinitionFactory();
+
+    void PushAnonymousUdt(std::shared_ptr<AnonymousUdt> item);
+    void PopAnonymousUdt();
 
 private:
-	DWORD m_SizeOfPreviousUdtField = 0;
-	const SYMBOL_UDT_FIELD* m_PreviousUdtField = nullptr;
-	const SYMBOL_UDT_FIELD* m_PreviousBitFieldField = nullptr;
-	AnonymousUdtStack m_AnonymousUdtStack;
-	AnonymousUdtStack m_AnonymousUnionStack;
-	AnonymousUdtStack m_AnonymousStructStack;
-	BitFieldRange m_CurrentBitField;
-	ContextStack m_MemberContextStack;
-	PDBReconstructorBase* m_ReconstructVisitor;
+    static const SymbolUdtField* GetNextUdtFieldWithRespectToBitFields(const SymbolUdtField* udtField);
+    static bool Is64BitBasicType(const Symbol& symbol);
+
+private:
+    DWORD m_sizeOfPreviousUdtField = 0;
+    const SymbolUdtField* m_previousUdtField = nullptr;
+    const SymbolUdtField* m_previousBitFieldField = nullptr;
+    AnonymousUdtStack m_anonymousUdtStack;
+    AnonymousUdtStack m_anonymousUnionStack;
+    AnonymousUdtStack m_anonymousStructStack;
+    BitFieldRange m_currentBitField;
+    ContextStack m_memberContextStack;
+    PDBReconstructorBase* m_reconstructVisitor;
 };
 
 #include "PDBSymbolVisitor.inl"

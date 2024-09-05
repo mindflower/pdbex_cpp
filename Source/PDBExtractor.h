@@ -4,37 +4,32 @@
 #include "PDBSymbolVisitor.h"
 #include "UdtFieldDefinition.h"
 
-#include <memory>
-#include <string>
-
 class PDBExtractor
 {
 public:
-	struct Settings
-	{
-		PDBHeaderReconstructor::Settings PdbHeaderReconstructorSettings;
+    struct Settings
+    {
+        PDBHeaderReconstructor::Settings pdbHeaderReconstructorSettings;
 
-		std::string PdbPath;
+        std::filesystem::path pdbPath;
+        std::filesystem::path outputFilename;
+    };
 
-		const char* OutputFilename = nullptr;
-	};
-
-	int Run(int argc, char** argv);
-
-private:
-	void PrintUsage();
-	void ParseParameters(int argc, char** argv);
-	void OpenPDBFile();
-	void PrintPDBDefinitions();
-	void PrintPDBFunctions();
-	void DumpAllSymbols();
-	void CloseOpenFiles();
+    int Run(int argc, char** argv);
 
 private:
-	PDB m_PDB;
-	Settings m_Settings;
+    void PrintUsage();
+    void ParseParameters(int argc, char** argv);
+    void OpenPDBFile();
+    void PrintPDBDefinitions();
+    void PrintPDBFunctions();
+    void DumpAllSymbols();
 
-	std::unique_ptr<PDBSymbolSorterBase> m_SymbolSorter;
-	std::unique_ptr<PDBHeaderReconstructor> m_HeaderReconstructor;
-	std::unique_ptr<PDBSymbolVisitor<UdtFieldDefinition>> m_SymbolVisitor;
+private:
+    PDB m_pdb;
+    Settings m_settings;
+
+    std::unique_ptr<PDBSymbolSorterBase> m_symbolSorter;
+    std::unique_ptr<PDBHeaderReconstructor> m_headerReconstructor;
+    std::unique_ptr<PDBSymbolVisitor<UdtFieldDefinition>> m_symbolVisitor;
 };

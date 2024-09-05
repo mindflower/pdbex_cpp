@@ -1,170 +1,227 @@
 #pragma once
 #define _CRT_SECURE_NO_WARNINGS
 #include <windows.h>
-
+#include <atlbase.h>
 #include <dia2.h>
-
+#include <string>
 #include <set>
 #include <unordered_set>
 #include <unordered_map>
+#include <variant>
+#include <filesystem>
 
-typedef struct _SYMBOL SYMBOL, *PSYMBOL;
+struct Symbol;
+using SymbolPtr = std::shared_ptr<Symbol>;
 
-typedef struct _SYMBOL_ENUM_FIELD
+struct SymbolEnumField
 {
-	CHAR*                Name;
-	VARIANT              Value;
-	SYMBOL*              Parent;
-
-} SYMBOL_ENUM_FIELD, *PSYMBOL_ENUM_FIELD;
-
-typedef struct _SYMBOL_UDT_FIELD
-{
-	enum SymTagEnum      Tag;
-	enum DataKind        DataKind;
-	CHAR*                Name;
-	SYMBOL*              Type;
-	DWORD                Offset;
-	DWORD                Bits;
-	DWORD                BitPosition;
-	SYMBOL*              Parent;
-	DWORD                Access;
-	BOOL                 IsBaseClass;
-
-} SYMBOL_UDT_FIELD, *PSYMBOL_UDT_FIELD;
-
-typedef struct _SYMBOL_ENUM
-{
-	DWORD                FieldCount;
-	SYMBOL_ENUM_FIELD*   Fields;
-
-} SYMBOL_ENUM, *PSYMBOL_ENUM;
-
-typedef struct _SYMBOL_TYPEDEF
-{
-	SYMBOL*              Type;
-
-} SYMBOL_TYPEDEF, *PSYMBOL_TYPEDEF;
-
-typedef struct _SYMBOL_POINTER
-{
-	SYMBOL*              Type;
-	BOOL                 IsReference;
-
-} SYMBOL_POINTER, *PSYMBOL_POINTER;
-
-typedef struct _SYMBOL_ARRAY
-{
-	SYMBOL*              ElementType;
-	DWORD                ElementCount;
-
-} SYMBOL_ARRAY, *PSYMBOL_ARRAY;
-
-typedef struct _SYMBOL_FUNCTION
-{
-	SYMBOL*              ReturnType;
-	CV_call_e            CallingConvention;
-	BOOL                 IsStatic;
-	BOOL                 IsVirtual;
-	DWORD                VirtualOffset;
-	BOOL                 IsOverride;
-	BOOL                 IsConst;
-	BOOL                 IsPure;
-	DWORD                Access;
-	DWORD                ArgumentCount;
-	SYMBOL**             Arguments;
-
-} SYMBOL_FUNCTION, *PSYMBOL_FUNCTION;
-
-typedef struct _SYMBOL_FUNCTIONARG
-{
-	SYMBOL*              Type;
-
-} SYMBOL_FUNCTIONARG, *PSYMBOL_FUNCTIONARG;
-
-typedef struct _SYMBOL_UDT_BASECLASS
-{
-	SYMBOL*              Type;
-	DWORD                Access;
-	BOOL                 IsVirtual;
-} SYMBOL_UDT_BASECLASS;
-
-typedef struct _SYMBOL_UDT
-{
-	UdtKind              Kind;
-
-	DWORD                FieldCount;
-	SYMBOL_UDT_FIELD*    Fields;
-
-	SYMBOL_UDT_FIELD*    FieldFirst() const { return &Fields[0]; }
-	SYMBOL_UDT_FIELD*    FieldLast() const { return &Fields[FieldCount]; }
-	const SYMBOL_UDT_FIELD*    FieldNext(const SYMBOL_UDT_FIELD* Field) const
-						{ return Field == FieldLast() ? FieldLast() : &Field[1]; }
-
-	const SYMBOL_UDT_FIELD*    FindFieldNext(const SYMBOL_UDT_FIELD* Field) const
-				{
-					while ((Field=FieldNext(Field)) != FieldLast()
-						&& (Field->Tag != SymTagData)
-						&& (Field->DataKind == DataIsStaticMember));
-					return Field;
-				}
-
-	DWORD                BaseClassCount;
-	SYMBOL_UDT_BASECLASS *BaseClassFields;
-
-} SYMBOL_UDT, *PSYMBOL_UDT;
-
-struct _SYMBOL
-{
-	enum SymTagEnum      Tag;
-	BasicType            BaseType;
-	DWORD                TypeId;
-	DWORD                Size;
-	BOOL                 IsConst;
-	BOOL                 IsVolatile;
-	CHAR*                Name;
-
-	union
-	{
-		SYMBOL_ENUM        Enum;
-		SYMBOL_TYPEDEF     Typedef;
-		SYMBOL_POINTER     Pointer;
-		SYMBOL_ARRAY       Array;
-		SYMBOL_FUNCTION    Function;
-		SYMBOL_FUNCTIONARG FunctionArg;
-		SYMBOL_UDT         Udt;
-	} u;
+    std::string name;
+    VARIANT value;
+    SymbolPtr parent;
 };
 
-class SymbolModule;
+struct SymbolUdtField
+{
+    enum SymTagEnum tag = SymTagNull;
+    enum DataKind dataKind = DataIsUnknown;
+    std::string name;
+    SymbolPtr type;
+    DWORD offset = 0;
+    DWORD bits = 0;
+    DWORD bitPosition = 0;
+    SymbolPtr parent;
+    DWORD access = 0;
+    bool isBaseClass = false;
+};
 
-using SymbolMap     = std::unordered_map<DWORD, SYMBOL*>;
-using SymbolNameMap = std::unordered_map<std::string, SYMBOL*>;
-using SymbolSet     = std::unordered_set<SYMBOL*>;
-using FunctionSet   = std::set<std::string>;
+struct SymbolEnum
+{
+    std::vector<SymbolEnumField> fields;
+};
+
+struct SymbolTypedef
+{
+    SymbolPtr type;
+};
+
+struct SymbolPointer
+{
+    SymbolPtr type;
+    bool isReference = false;
+};
+
+struct SymbolArray
+{
+    SymbolPtr elementType;
+    DWORD elementCount = 0;
+};
+
+struct SymbolFunction
+{
+    SymbolPtr returnType;
+    CV_call_e callingConvention = CV_CALL_RESERVED;
+    bool isStatic = false;
+    bool isVirtual = false;
+    DWORD virtualOffset = false;
+    bool isOverride = false;
+    bool isConst = false;
+    bool isPure = false;
+    DWORD access = 0;
+    std::vector<SymbolPtr> arguments;
+
+};
+
+struct SymbolFunctionArg
+{
+    SymbolPtr type;
+};
+
+struct SymbolUdtBaseClass
+{
+    SymbolPtr type;
+    DWORD access = 0;
+    bool isVirtual = false;
+};
+
+struct SymbolUdt
+{
+    UdtKind kind = UdtStruct;
+    std::vector<SymbolUdtField> fields;
+    std::vector<SymbolUdtBaseClass> baseClassFields;
+
+    //TODO: refactor this shit
+    const SymbolUdtField* FieldFirst() const;
+    const SymbolUdtField* FieldLast() const;
+    const SymbolUdtField* FieldNext(const SymbolUdtField* Field) const;
+    const SymbolUdtField* FindFieldNext(const SymbolUdtField* Field) const;
+};
+
+using SymbolVariant = std::variant<std::monostate,
+                                   SymbolEnum,
+                                   SymbolTypedef,
+                                   SymbolPointer,
+                                   SymbolArray,
+                                   SymbolFunction,
+                                   SymbolFunctionArg,
+                                   SymbolUdt>;
+
+struct Symbol
+{
+    enum SymTagEnum tag = SymTagNull;
+    BasicType baseType = btNoType;
+    DWORD typeId = 0;
+    DWORD symIndexId = 0;
+    DWORD size = 0;
+    bool isConst = false;
+    bool isVolatile = false;
+    std::string name;
+    SymbolVariant variant;
+};
+
+using SymbolMap = std::unordered_map<DWORD, SymbolPtr>;
+using SymbolNameMap = std::unordered_map<std::string, SymbolPtr>;
+using SymbolSet = std::unordered_set<SymbolPtr>;
+using FunctionSet = std::set<std::string>;
+
+class SymbolModuleBase
+{
+public:
+    SymbolModuleBase();
+    virtual ~SymbolModuleBase() = default;
+
+    virtual bool Open(const std::filesystem::path& path);
+    virtual void Close();
+    virtual bool IsOpen() const;
+
+private:
+    HRESULT LoadDiaViaCoCreateInstance();
+    HRESULT LoadDiaViaLoadLibrary();
+
+protected:
+    ATL::CComPtr<IDiaDataSource> m_dataSource;
+    ATL::CComPtr<IDiaSession> m_session;
+    ATL::CComPtr<IDiaSymbol> m_globalSymbol;
+};
+
+
+using DiaSymbolPtr = ATL::CComPtr<IDiaSymbol>;
+using DiaEnumSymbolsPtr = ATL::CComPtr<IDiaEnumSymbols>;
+
+class SymbolModule : public SymbolModuleBase
+{
+public:
+    ~SymbolModule();
+
+    bool Open(const std::filesystem::path& path) override;
+    void Close() override;
+
+    const std::filesystem::path& GetPath() const;
+    DWORD GetMachineType() const;
+    CV_CFL_LANG GetLanguage() const;
+
+    SymbolPtr GetSymbolByName(const std::string& symbolName);
+    SymbolPtr GetSymbolBySymbolIndex(DWORD typeId);
+    SymbolPtr GetSymbol(const DiaSymbolPtr& diaSymbol);
+    std::string GetSymbolName(const DiaSymbolPtr& DiaSymbol, bool raw = true);
+
+    void UpdateSymbolMapFromEnumerator(const DiaEnumSymbolsPtr& DiaSymbolEnumerator);
+    void BuildSymbolMapFromEnumerator(const DiaEnumSymbolsPtr& DiaSymbolEnumerator);
+    void BuildFunctionSetFromEnumerator(const DiaEnumSymbolsPtr& DiaSymbolEnumerator);
+
+    void BuildSymbolMap();
+    const SymbolMap& GetSymbolMap() const;
+    const SymbolNameMap& GetSymbolNameMap() const;
+    const FunctionSet& GetFunctionSet() const;
+
+private:
+    void InitSymbol(const DiaSymbolPtr& DiaSymbol, const SymbolPtr& Symbol);
+    void ProcessSymbolBase(const DiaSymbolPtr& DiaSymbol, const SymbolPtr& Symbol);
+    void ProcessSymbolEnum(const DiaSymbolPtr& DiaSymbol, const SymbolPtr& Symbol);
+    void ProcessSymbolTypedef(const DiaSymbolPtr& DiaSymbol, const SymbolPtr& Symbol);
+    void ProcessSymbolPointer(const DiaSymbolPtr& DiaSymbol, const SymbolPtr& Symbol);
+    void ProcessSymbolArray(const DiaSymbolPtr& DiaSymbol, const SymbolPtr& Symbol);
+    void ProcessSymbolFunction(const DiaSymbolPtr& DiaSymbol, const SymbolPtr& Symbol);
+    void ProcessSymbolFunctionArg(const DiaSymbolPtr& DiaSymbol, const SymbolPtr& Symbol);
+    void ProcessSymbolUdt(const DiaSymbolPtr& DiaSymbol, const SymbolPtr& Symbol);
+    void ProcessSymbolFunctionEx(const DiaSymbolPtr& DiaSymbol, const SymbolPtr& Symbol);
+
+private:
+    std::filesystem::path m_path;
+    SymbolMap m_symbolMap;
+    SymbolNameMap m_symbolNameMap;
+    SymbolSet m_symbolSet;
+    FunctionSet m_functionSet;
+
+    DWORD m_machineType = 0;
+    CV_CFL_LANG m_language = CV_CFL_C;
+};
 
 class PDB
 {
 public:
-	PDB();
-	PDB(IN const CHAR* Path);
-	~PDB();
-	BOOL Open(IN const CHAR* Path);
-	BOOL IsOpened() const;
-	const CHAR* GetPath() const;
-	VOID Close();
-	DWORD GetMachineType() const;
-	CV_CFL_LANG GetLanguage() const;
-	const SYMBOL* GetSymbolByName(IN const CHAR* SymbolName);
-	const SYMBOL* GetSymbolByTypeId(IN DWORD TypeId);
-	const SymbolMap& GetSymbolMap() const;
-	const SymbolNameMap& GetSymbolNameMap() const;
-	const FunctionSet& GetFunctionSet() const;
-	static const CHAR* GetBasicTypeString(IN BasicType BaseType, IN DWORD Size);
-	static const CHAR* GetBasicTypeString(IN const SYMBOL* Symbol);
-	static const CHAR* GetUdtKindString(IN UdtKind Kind);
-	static BOOL IsUnnamedSymbol(const SYMBOL* Symbol);
+    PDB();
+    PDB(const std::filesystem::path& path);
+
+    bool Open(const std::filesystem::path& path);
+    bool IsOpened() const;
+    void Close();
+
+    const std::filesystem::path GetPath() const;
+
+    DWORD GetMachineType() const;
+    CV_CFL_LANG GetLanguage() const;
+
+    const SymbolPtr GetSymbolByName(const std::string& symbolName);
+    const SymbolPtr GetSymbolBySymbolIndex(DWORD typeId);
+    const SymbolMap& GetSymbolMap() const;
+    const SymbolNameMap& GetSymbolNameMap() const;
+    const FunctionSet& GetFunctionSet() const;
+
+    static const std::string GetBasicTypeString(BasicType baseType, DWORD size);
+    static const std::string GetBasicTypeString(const Symbol& symbol);
+    static const std::string GetUdtKindString(UdtKind kind);
+    static bool IsUnnamedSymbol(const Symbol& symbol);
 
 private:
-	SymbolModule* m_Impl;
+    std::unique_ptr<SymbolModule> m_impl;
 };

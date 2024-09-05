@@ -1,132 +1,157 @@
 #pragma once
 #include "PDB.h"
+#include <cassert>
 
 class PDBSymbolVisitorBase
 {
 public:
-	virtual ~PDBSymbolVisitorBase() = default;
+    virtual ~PDBSymbolVisitorBase() = default;
 
-	virtual	void Visit(const SYMBOL* Symbol)
-	{
-		switch (Symbol->Tag)
-		{
-		case SymTagBaseType:
-			VisitBaseType(Symbol);
-			break;
-		case SymTagEnum:
-			VisitEnumType(Symbol);
-			break;
-		case SymTagTypedef:
-			VisitTypedefType(Symbol);
-			break;
-		case SymTagPointerType:
-			VisitPointerType(Symbol);
-			break;
-		case SymTagArrayType:
-			VisitArrayType(Symbol);
-			break;
-		case SymTagFunction:
-		case SymTagFunctionType:
-			VisitFunctionType(Symbol);
-			break;
-		case SymTagFunctionArgType:
-			VisitFunctionArgType(Symbol);
-			break;
-		case SymTagUDT:
-			VisitUdt(Symbol);
-			break;
-		default:
-			VisitOtherType(Symbol);
-			break;
-		}
-	}
+    virtual	void Visit(const Symbol& symbol)
+    {
+        switch (symbol.tag)
+        {
+        case SymTagBaseType:
+            VisitBaseType(symbol);
+            break;
+
+        case SymTagEnum:
+            VisitEnumType(symbol);
+            break;
+
+        case SymTagTypedef:
+            VisitTypedefType(symbol);
+            break;
+
+        case SymTagPointerType:
+            VisitPointerType(symbol);
+            break;
+
+        case SymTagArrayType:
+            VisitArrayType(symbol);
+            break;
+
+        case SymTagFunction:
+        case SymTagFunctionType:
+            VisitFunctionType(symbol);
+            break;
+
+        case SymTagFunctionArgType:
+            VisitFunctionArgType(symbol);
+            break;
+
+        case SymTagUDT:
+            VisitUdt(symbol);
+            break;
+
+        default:
+            VisitOtherType(symbol);
+            break;
+        }
+    }
 
 protected:
-	virtual	void VisitBaseType(const SYMBOL* Symbol)
-	{
-	}
+    virtual	void VisitBaseType(const Symbol& symbol)
+    {
+    }
 
-	virtual	void VisitEnumType(const SYMBOL* Symbol)
-	{
-		for (DWORD i = 0; i < Symbol->u.Enum.FieldCount; ++i)
-		{
-			VisitEnumField(&Symbol->u.Enum.Fields[i]);
-		}
-	}
+    virtual	void VisitEnumType(const Symbol& symbol)
+    {
+        const auto& symbolEnums = std::get<SymbolEnum>(symbol.variant);
+        for (const auto& symbolEnum : symbolEnums.fields)
+        {
+            VisitEnumField(symbolEnum);
+        }
+    }
 
-	virtual	void VisitTypedefType(const SYMBOL* Symbol)
-	{
-		Visit(Symbol->u.Typedef.Type);
-	}
+    virtual	void VisitTypedefType(const Symbol& symbol)
+    {
+        const auto& symbolTypedef = std::get<SymbolTypedef>(symbol.variant);
 
-	virtual void VisitPointerType(const SYMBOL* Symbol)
-	{
-		Visit(Symbol->u.Pointer.Type);
-	}
+        assert(symbolTypedef.type);
+        Visit(*symbolTypedef.type);
+    }
 
-	virtual void VisitArrayType(const SYMBOL* Symbol)
-	{
-		Visit(Symbol->u.Array.ElementType);
-	}
+    virtual void VisitPointerType(const Symbol& symbol)
+    {
+        const auto& symbolPointer = std::get<SymbolPointer>(symbol.variant);
 
-	virtual void VisitFunctionType(const SYMBOL* Symbol)
-	{
-		for (DWORD i = 0; i < Symbol->u.Function.ArgumentCount; ++i)
-		{
-			Visit(Symbol->u.Function.Arguments[i]);
-		}
-		if (Symbol->u.Function.ReturnType)
-			Visit(Symbol->u.Function.ReturnType);
-	}
+        assert(symbolPointer.type);
+        Visit(*symbolPointer.type);
+    }
 
-	virtual void VisitFunctionArgType(const SYMBOL* Symbol)
-	{
-		Visit(Symbol->u.FunctionArg.Type);
-	}
+    virtual void VisitArrayType(const Symbol& symbol)
+    {
+        const auto& symbolArray = std::get<SymbolArray>(symbol.variant);
 
-	virtual void VisitUdt(const SYMBOL* Symbol)
-	{
-		if (Symbol->u.Udt.FieldCount == 0)
-		{
-			return;
-		}
+        assert(symbolArray.elementType);
+        Visit(*symbolArray.elementType);
+    }
 
-		const SYMBOL_UDT_FIELD* UdtField = Symbol->u.Udt.Fields;
-		const SYMBOL_UDT_FIELD* EndOfUdtField = Symbol->u.Udt.FieldLast();
+    virtual void VisitFunctionType(const Symbol& symbol)
+    {
+        const auto& symbolFunction = std::get<SymbolFunction>(symbol.variant);
+        for (const auto& argument : symbolFunction.arguments)
+        {
+            assert(argument);
+            Visit(*argument);
+        }
 
-		do {
-			if (UdtField->Bits == 0)
-			{
-				VisitUdtFieldBegin(UdtField);
-				VisitUdtField(UdtField);
-				VisitUdtFieldEnd(UdtField);
-			} else
-			{
-				VisitUdtFieldBitFieldBegin(UdtField);
+        if (symbolFunction.returnType)
+        {
+            Visit(*symbolFunction.returnType);
+        }
+    }
 
-				do {
-					VisitUdtFieldBitField(UdtField);
-				} while (++UdtField < EndOfUdtField && UdtField->BitPosition != 0);
+    virtual void VisitFunctionArgType(const Symbol& symbol)
+    {
+        const auto& symbolFunctionArg = std::get<SymbolFunctionArg>(symbol.variant);
 
-				VisitUdtFieldBitFieldEnd(--UdtField);
-			}
-		} while (++UdtField < EndOfUdtField);
-	}
+        assert(symbolFunctionArg.type);
+        Visit(*symbolFunctionArg.type);
+    }
 
-	virtual void VisitOtherType(const SYMBOL* Symbol) {}
+    virtual void VisitUdt(const Symbol& symbol)
+    {
+        const auto& symbolUdt = std::get<SymbolUdt>(symbol.variant);
 
-	virtual	void VisitEnumField(const SYMBOL_ENUM_FIELD* EnumField) {}
+        const auto endOfUdtFieldIt = symbolUdt.fields.end();
+        for (auto udtFieldIt = symbolUdt.fields.begin(); udtFieldIt != endOfUdtFieldIt; ++udtFieldIt)
+        {
+            if (udtFieldIt->bits == 0)
+            {
+                VisitUdtFieldBegin(*udtFieldIt);
+                VisitUdtField(*udtFieldIt);
+                VisitUdtFieldEnd(*udtFieldIt);
+            }
+            else
+            {
+                VisitUdtFieldBitFieldBegin(*udtFieldIt);
 
-	virtual void VisitUdtFieldBegin(const SYMBOL_UDT_FIELD* UdtField) {}
-	virtual void VisitUdtFieldEnd(const SYMBOL_UDT_FIELD* UdtField) {}
+                do
+                {
+                    VisitUdtFieldBitField(*udtFieldIt);
+                } while (++udtFieldIt != endOfUdtFieldIt && udtFieldIt->bitPosition != 0);
 
-	virtual void VisitUdtField(const SYMBOL_UDT_FIELD* UdtField) {}
+                VisitUdtFieldBitFieldEnd(*(--udtFieldIt));
+            }
+        };
+    }
 
-	virtual	void VisitUdtFieldBitFieldBegin(const SYMBOL_UDT_FIELD* UdtField) {}
-	virtual	void VisitUdtFieldBitFieldEnd(const SYMBOL_UDT_FIELD* UdtField)	{}
+    virtual void VisitOtherType(const Symbol& symbol) {}
 
-	virtual	void VisitUdtFieldBitField(const SYMBOL_UDT_FIELD* UdtField)
-	{
-		VisitUdtField(UdtField);
-	}
+    virtual	void VisitEnumField(const SymbolEnumField& enumField) {}
+
+    virtual void VisitUdtFieldBegin(const SymbolUdtField& udtField) {}
+    virtual void VisitUdtFieldEnd(const SymbolUdtField& udtField) {}
+
+    virtual void VisitUdtField(const SymbolUdtField& udtField) {}
+
+    virtual	void VisitUdtFieldBitFieldBegin(const SymbolUdtField& udtField) {}
+    virtual	void VisitUdtFieldBitFieldEnd(const SymbolUdtField& udtField) {}
+
+    virtual	void VisitUdtFieldBitField(const SymbolUdtField& udtField)
+    {
+        VisitUdtField(udtField);
+    }
 };

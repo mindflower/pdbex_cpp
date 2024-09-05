@@ -7,447 +7,450 @@
 #include <stack>
 
 template <typename MEMBER_DEFINITION_TYPE>
-PDBSymbolVisitor<MEMBER_DEFINITION_TYPE>::PDBSymbolVisitor(PDBReconstructorBase* ReconstructVisitor)
+PDBSymbolVisitor<MEMBER_DEFINITION_TYPE>::PDBSymbolVisitor(PDBReconstructorBase* ReconstructVisitor) :
+    m_reconstructVisitor(ReconstructVisitor)
 {
-	m_ReconstructVisitor = ReconstructVisitor;
 }
 
 template <typename MEMBER_DEFINITION_TYPE>
-void PDBSymbolVisitor<MEMBER_DEFINITION_TYPE>::Run(const SYMBOL* Symbol)
+void PDBSymbolVisitor<MEMBER_DEFINITION_TYPE>::Run(const Symbol& symbol)
 {
-	Visit(Symbol);
+    Visit(symbol);
 }
 
 template <typename MEMBER_DEFINITION_TYPE>
-void PDBSymbolVisitor<MEMBER_DEFINITION_TYPE>::Visit(const SYMBOL* Symbol)
+void PDBSymbolVisitor<MEMBER_DEFINITION_TYPE>::Visit(const Symbol& symbol)
 {
-	PDBSymbolVisitorBase::Visit(Symbol);
+    PDBSymbolVisitorBase::Visit(symbol);
 }
 
 template <typename MEMBER_DEFINITION_TYPE>
-void PDBSymbolVisitor<MEMBER_DEFINITION_TYPE>::VisitBaseType(const SYMBOL* Symbol)
+void PDBSymbolVisitor<MEMBER_DEFINITION_TYPE>::VisitBaseType(const Symbol& symbol)
 {
-	m_MemberContextStack.top()->VisitBaseType(Symbol);
+    m_memberContextStack.top()->VisitBaseType(symbol);
 }
 
 template <typename MEMBER_DEFINITION_TYPE>
-void PDBSymbolVisitor<MEMBER_DEFINITION_TYPE>::VisitEnumType(const SYMBOL* Symbol)
+void PDBSymbolVisitor<MEMBER_DEFINITION_TYPE>::VisitEnumType(const Symbol& symbol)
 {
-	if (m_MemberContextStack.size())
-	{
-		m_MemberContextStack.top()->VisitEnumType(Symbol);
-	} else
-	if (m_ReconstructVisitor->OnEnumType(Symbol))
-	{
-		m_ReconstructVisitor->OnEnumTypeBegin(Symbol);
-		PDBSymbolVisitorBase::VisitEnumType(Symbol);
-		m_ReconstructVisitor->OnEnumTypeEnd(Symbol);
-	}
+    if (m_memberContextStack.size())
+    {
+        m_memberContextStack.top()->VisitEnumType(symbol);
+    }
+    else
+        if (m_reconstructVisitor->OnEnumType(symbol))
+        {
+            m_reconstructVisitor->OnEnumTypeBegin(symbol);
+            PDBSymbolVisitorBase::VisitEnumType(symbol);
+            m_reconstructVisitor->OnEnumTypeEnd(symbol);
+        }
 }
 
 template <typename MEMBER_DEFINITION_TYPE>
-void PDBSymbolVisitor<MEMBER_DEFINITION_TYPE>::VisitTypedefType(const SYMBOL* Symbol)
+void PDBSymbolVisitor<MEMBER_DEFINITION_TYPE>::VisitTypedefType(const Symbol& symbol)
 {
-	m_MemberContextStack.top()->VisitTypedefTypeBegin(Symbol);
-	PDBSymbolVisitorBase::VisitTypedefType(Symbol);
-	m_MemberContextStack.top()->VisitTypedefTypeEnd(Symbol);
+    m_memberContextStack.top()->VisitTypedefTypeBegin(symbol);
+    PDBSymbolVisitorBase::VisitTypedefType(symbol);
+    m_memberContextStack.top()->VisitTypedefTypeEnd(symbol);
 }
 
 template <typename MEMBER_DEFINITION_TYPE>
-void PDBSymbolVisitor<MEMBER_DEFINITION_TYPE>::VisitPointerType(const SYMBOL* Symbol)
+void PDBSymbolVisitor<MEMBER_DEFINITION_TYPE>::VisitPointerType(const Symbol& symbol)
 {
-	m_MemberContextStack.top()->VisitPointerTypeBegin(Symbol);
-	PDBSymbolVisitorBase::VisitPointerType(Symbol);
-	m_MemberContextStack.top()->VisitPointerTypeEnd(Symbol);
+    m_memberContextStack.top()->VisitPointerTypeBegin(symbol);
+    PDBSymbolVisitorBase::VisitPointerType(symbol);
+    m_memberContextStack.top()->VisitPointerTypeEnd(symbol);
 }
 
 template <typename MEMBER_DEFINITION_TYPE>
-void PDBSymbolVisitor<MEMBER_DEFINITION_TYPE>::VisitArrayType(const SYMBOL* Symbol)
+void PDBSymbolVisitor<MEMBER_DEFINITION_TYPE>::VisitArrayType(const Symbol& symbol)
 {
-	m_MemberContextStack.top()->VisitArrayTypeBegin(Symbol);
-	PDBSymbolVisitorBase::VisitArrayType(Symbol);
-	m_MemberContextStack.top()->VisitArrayTypeEnd(Symbol);
+    m_memberContextStack.top()->VisitArrayTypeBegin(symbol);
+    PDBSymbolVisitorBase::VisitArrayType(symbol);
+    m_memberContextStack.top()->VisitArrayTypeEnd(symbol);
 }
 
 template <typename MEMBER_DEFINITION_TYPE>
-void PDBSymbolVisitor<MEMBER_DEFINITION_TYPE>::VisitFunctionType(const SYMBOL* Symbol)
+void PDBSymbolVisitor<MEMBER_DEFINITION_TYPE>::VisitFunctionType(const Symbol& symbol)
 {
-	m_MemberContextStack.top()->VisitFunctionTypeBegin(Symbol);
-	PDBSymbolVisitorBase::VisitFunctionType(Symbol);
-	m_MemberContextStack.top()->VisitFunctionTypeEnd(Symbol);
+    m_memberContextStack.top()->VisitFunctionTypeBegin(symbol);
+    PDBSymbolVisitorBase::VisitFunctionType(symbol);
+    m_memberContextStack.top()->VisitFunctionTypeEnd(symbol);
 }
 
 template <typename MEMBER_DEFINITION_TYPE>
-void PDBSymbolVisitor<MEMBER_DEFINITION_TYPE>::VisitFunctionArgType(const SYMBOL* Symbol)
+void PDBSymbolVisitor<MEMBER_DEFINITION_TYPE>::VisitFunctionArgType(const Symbol& symbol)
 {
-	m_MemberContextStack.top()->VisitFunctionArgTypeBegin(Symbol);
-	PDBSymbolVisitorBase::VisitFunctionArgType(Symbol);
-	m_MemberContextStack.top()->VisitFunctionArgTypeEnd(Symbol);
+    m_memberContextStack.top()->VisitFunctionArgTypeBegin(symbol);
+    PDBSymbolVisitorBase::VisitFunctionArgType(symbol);
+    m_memberContextStack.top()->VisitFunctionArgTypeEnd(symbol);
 }
 
 template <typename MEMBER_DEFINITION_TYPE>
-void PDBSymbolVisitor<MEMBER_DEFINITION_TYPE>::VisitUdt(const SYMBOL* Symbol)
+void PDBSymbolVisitor<MEMBER_DEFINITION_TYPE>::VisitUdt(const Symbol& symbol)
 {
-	if (!PDB::IsUnnamedSymbol(Symbol) && m_MemberContextStack.size())
-	{
-		m_MemberContextStack.top()->VisitUdtType(Symbol);
-	} else
-	if (m_ReconstructVisitor->OnUdt(Symbol))
-	{
-		if (Symbol->Size > 0)
-		{
-			AnonymousUdtStack AnonymousUDTStackBackup;
-			AnonymousUdtStack AnonymousUnionStackBackup;
-			AnonymousUdtStack AnonymousStructStackBackup;
-			m_AnonymousUdtStack.swap(AnonymousUDTStackBackup);
-			m_AnonymousUnionStack.swap(AnonymousUnionStackBackup);
-			m_AnonymousStructStack.swap(AnonymousStructStackBackup);
-			{
-				m_MemberContextStack.push(MemberDefinitionFactory());
+    if (!PDB::IsUnnamedSymbol(symbol) && m_memberContextStack.size())
+    {
+        m_memberContextStack.top()->VisitUdtType(symbol);
+    }
+    else if (m_reconstructVisitor->OnUdt(symbol))
+    {
+        if (symbol.size > 0)
+        {
+            AnonymousUdtStack AnonymousUDTStackBackup;
+            AnonymousUdtStack AnonymousUnionStackBackup;
+            AnonymousUdtStack AnonymousStructStackBackup;
+            m_anonymousUdtStack.swap(AnonymousUDTStackBackup);
+            m_anonymousUnionStack.swap(AnonymousUnionStackBackup);
+            m_anonymousStructStack.swap(AnonymousStructStackBackup);
+            {
+                m_memberContextStack.push(MemberDefinitionFactory());
 
-				m_ReconstructVisitor->OnUdtBegin(Symbol);
-				PDBSymbolVisitorBase::VisitUdt(Symbol);
-				m_ReconstructVisitor->OnUdtEnd(Symbol);
+                m_reconstructVisitor->OnUdtBegin(symbol);
+                PDBSymbolVisitorBase::VisitUdt(symbol);
+                m_reconstructVisitor->OnUdtEnd(symbol);
 
-				m_MemberContextStack.pop();
-			}
-			m_AnonymousStructStack.swap(AnonymousStructStackBackup);
-			m_AnonymousUnionStack.swap(AnonymousUnionStackBackup);
-			m_AnonymousUdtStack.swap(AnonymousUDTStackBackup);
-		}
-	}
+                m_memberContextStack.pop();
+            }
+            m_anonymousStructStack.swap(AnonymousStructStackBackup);
+            m_anonymousUnionStack.swap(AnonymousUnionStackBackup);
+            m_anonymousUdtStack.swap(AnonymousUDTStackBackup);
+        }
+    }
 }
 
 template <typename MEMBER_DEFINITION_TYPE>
-void PDBSymbolVisitor<MEMBER_DEFINITION_TYPE>::VisitOtherType(const SYMBOL* Symbol)
+void PDBSymbolVisitor<MEMBER_DEFINITION_TYPE>::VisitOtherType(const Symbol& symbol)
 {
 
 }
 
 template <typename MEMBER_DEFINITION_TYPE>
-void PDBSymbolVisitor<MEMBER_DEFINITION_TYPE>::VisitEnumField(const SYMBOL_ENUM_FIELD* EnumField)
+void PDBSymbolVisitor<MEMBER_DEFINITION_TYPE>::VisitEnumField(const SymbolEnumField& EnumField)
 {
-	m_ReconstructVisitor->OnEnumField(EnumField);
+    m_reconstructVisitor->OnEnumField(EnumField);
 }
 
 template <typename MEMBER_DEFINITION_TYPE>
-void PDBSymbolVisitor<MEMBER_DEFINITION_TYPE>::VisitUdtField(const SYMBOL_UDT_FIELD* UdtField)
+void PDBSymbolVisitor<MEMBER_DEFINITION_TYPE>::VisitUdtField(const SymbolUdtField& udtField)
 {
-	if (UdtField->Type->Tag == SymTagVTable ||
-	    UdtField->IsBaseClass == TRUE)
-	{
-		return;
-	}
+    if (udtField.type->tag == SymTagVTable ||
+        udtField.isBaseClass == true)
+    {
+        return;
+    }
 
-	BOOL IsBitFieldMember = UdtField->Bits != 0;
-	BOOL IsFirstBitFieldMember = IsBitFieldMember && !m_PreviousBitFieldField;
+    BOOL IsBitFieldMember = udtField.bits != 0;
+    BOOL IsFirstBitFieldMember = IsBitFieldMember && !m_previousBitFieldField;
 
-	m_MemberContextStack.push(MemberDefinitionFactory());
-	m_MemberContextStack.top()->SetMemberName(UdtField->Name);
+    m_memberContextStack.push(MemberDefinitionFactory());
+    m_memberContextStack.top()->SetMemberName(udtField.name);
 
-	if (!IsBitFieldMember || IsFirstBitFieldMember)
-	{
-		CheckForDataFieldPadding(UdtField);
-		CheckForAnonymousUnion(UdtField);
-		CheckForAnonymousStruct(UdtField);
-	}
+    if (!IsBitFieldMember || IsFirstBitFieldMember)
+    {
+        CheckForDataFieldPadding(&udtField);
+        CheckForAnonymousUnion(&udtField);
+        CheckForAnonymousStruct(&udtField);
+    }
 
-	if (IsFirstBitFieldMember)
-	{
-		BOOL IsFirstBitFieldMemberPadding = UdtField->BitPosition != 0;
+    if (IsFirstBitFieldMember)
+    {
+        BOOL IsFirstBitFieldMemberPadding = udtField.bitPosition != 0;
 
-		assert(m_CurrentBitField.HasValue() == false);
+        assert(m_currentBitField.HasValue() == false);
 
-		m_CurrentBitField.First = IsFirstBitFieldMemberPadding ? nullptr : UdtField;
-		m_CurrentBitField.Last = GetNextUdtFieldWithRespectToBitFields(UdtField) - 1;
+        m_currentBitField.first = IsFirstBitFieldMemberPadding ? nullptr : &udtField;
+        m_currentBitField.last = GetNextUdtFieldWithRespectToBitFields(&udtField) - 1;
 
-		m_ReconstructVisitor->OnUdtFieldBitFieldBegin(m_CurrentBitField.First, m_CurrentBitField.Last);
-	}
+        m_reconstructVisitor->OnUdtFieldBitFieldBegin(*m_currentBitField.first, *m_currentBitField.last);
+    }
 
-	if (IsBitFieldMember)
-	{
-		CheckForBitFieldFieldPadding(UdtField);
-	}
+    if (IsBitFieldMember)
+    {
+        CheckForBitFieldFieldPadding(&udtField);
+    }
 
-	m_ReconstructVisitor->OnUdtFieldBegin(UdtField);
-	Visit(UdtField->Type);
-	m_ReconstructVisitor->OnUdtField(UdtField, m_MemberContextStack.top().get());
-	m_ReconstructVisitor->OnUdtFieldEnd(UdtField);
+    m_reconstructVisitor->OnUdtFieldBegin(udtField);
+    Visit(*udtField.type);
+    m_reconstructVisitor->OnUdtField(udtField, *m_memberContextStack.top().get());
+    m_reconstructVisitor->OnUdtFieldEnd(udtField);
 
-	m_MemberContextStack.pop();
+    m_memberContextStack.pop();
 
-	if (IsBitFieldMember)
-	{
-		m_PreviousBitFieldField = UdtField;
-	}
+    if (IsBitFieldMember)
+    {
+        m_previousBitFieldField = &udtField;
+    }
 }
 
 template <typename MEMBER_DEFINITION_TYPE>
-void PDBSymbolVisitor<MEMBER_DEFINITION_TYPE>::VisitUdtFieldEnd(const SYMBOL_UDT_FIELD* UdtField)
+void PDBSymbolVisitor<MEMBER_DEFINITION_TYPE>::VisitUdtFieldEnd(const SymbolUdtField& udtField)
 {
-	CheckForEndOfAnonymousUdt(UdtField);
+    CheckForEndOfAnonymousUdt(&udtField);
 }
 
 template <typename MEMBER_DEFINITION_TYPE>
-void PDBSymbolVisitor<MEMBER_DEFINITION_TYPE>::VisitUdtFieldBitFieldEnd(const SYMBOL_UDT_FIELD* UdtField)
+void PDBSymbolVisitor<MEMBER_DEFINITION_TYPE>::VisitUdtFieldBitFieldEnd(const SymbolUdtField& udtField)
 {
-	assert(m_CurrentBitField.HasValue() == true);
-	//assert(m_CurrentBitField.Last == UdtField);
+    assert(m_currentBitField.HasValue() == true);
+    //assert(m_currentBitField.last == udtField);
 
-	m_ReconstructVisitor->OnUdtFieldBitFieldEnd(m_CurrentBitField.First, m_CurrentBitField.Last);
+    m_reconstructVisitor->OnUdtFieldBitFieldEnd(*m_currentBitField.first, *m_currentBitField.last);
 
-	m_CurrentBitField.Clear();
+    m_currentBitField.Clear();
 
-	VisitUdtFieldEnd(UdtField);
+    VisitUdtFieldEnd(udtField);
 
-	m_PreviousBitFieldField = nullptr;
+    m_previousBitFieldField = nullptr;
 }
 
 template <typename MEMBER_DEFINITION_TYPE>
-void PDBSymbolVisitor<MEMBER_DEFINITION_TYPE>::CheckForDataFieldPadding(const SYMBOL_UDT_FIELD* UdtField)
+void PDBSymbolVisitor<MEMBER_DEFINITION_TYPE>::CheckForDataFieldPadding(const SymbolUdtField* udtField)
 {
-	UdtFieldContext UdtFieldCtx(UdtField);
-	DWORD PreviousUdtFieldOffset = 0;
-	DWORD SizeOfPreviousUdtField = 0;
+    UdtFieldContext UdtFieldCtx(udtField);
+    DWORD PreviousUdtFieldOffset = 0;
+    DWORD SizeOfPreviousUdtField = 0;
 
-	if (UdtFieldCtx.IsFirst() == false)
-	{
-		PreviousUdtFieldOffset = m_PreviousUdtField->Offset;
-		SizeOfPreviousUdtField = m_SizeOfPreviousUdtField;
-	}
+    if (UdtFieldCtx.IsFirst() == false)
+    {
+        PreviousUdtFieldOffset = m_previousUdtField->offset;
+        SizeOfPreviousUdtField = m_sizeOfPreviousUdtField;
+    }
 
-	if (PreviousUdtFieldOffset + SizeOfPreviousUdtField < UdtField->Offset)
-	{
-		DWORD Difference = UdtField->Offset - (PreviousUdtFieldOffset + SizeOfPreviousUdtField);
+    if (PreviousUdtFieldOffset + SizeOfPreviousUdtField < udtField->offset)
+    {
+        DWORD Difference = udtField->offset - (PreviousUdtFieldOffset + SizeOfPreviousUdtField);
 
-		BOOL DifferenceIsDivisibleBy4 = !(Difference % 4);
+        BOOL DifferenceIsDivisibleBy4 = !(Difference % 4);
 
-		m_ReconstructVisitor->OnPaddingMember(
-			UdtField,
-			DifferenceIsDivisibleBy4 ?     btLong     :   btChar  ,
-			DifferenceIsDivisibleBy4 ?       4        :     1     ,
-			DifferenceIsDivisibleBy4 ? Difference / 4 : Difference
-			);
-	}
+        m_reconstructVisitor->OnPaddingMember(
+            *udtField,
+            DifferenceIsDivisibleBy4 ? btLong : btChar,
+            DifferenceIsDivisibleBy4 ? 4 : 1,
+            DifferenceIsDivisibleBy4 ? Difference / 4 : Difference
+        );
+    }
 }
 
 template <typename MEMBER_DEFINITION_TYPE>
-void PDBSymbolVisitor<MEMBER_DEFINITION_TYPE>::CheckForBitFieldFieldPadding(const SYMBOL_UDT_FIELD* UdtField)
+void PDBSymbolVisitor<MEMBER_DEFINITION_TYPE>::CheckForBitFieldFieldPadding(const SymbolUdtField* udtField)
 {
-	BOOL WasPreviousBitFieldMember = m_PreviousBitFieldField ? m_PreviousBitFieldField->Bits != 0 : FALSE;
+    BOOL WasPreviousBitFieldMember = m_previousBitFieldField ? m_previousBitFieldField->bits != 0 : FALSE;
 
-	if (
-	  (UdtField->BitPosition != 0 && !WasPreviousBitFieldMember) ||
-	  (WasPreviousBitFieldMember &&
-	   UdtField->BitPosition != m_PreviousBitFieldField->BitPosition + m_PreviousBitFieldField->Bits)
-	  )
-	{
-		m_ReconstructVisitor->OnPaddingBitFieldField(UdtField, m_PreviousBitFieldField);
-	}
+    if (
+        (udtField->bitPosition != 0 && !WasPreviousBitFieldMember) ||
+        (WasPreviousBitFieldMember &&
+         udtField->bitPosition != m_previousBitFieldField->bitPosition + m_previousBitFieldField->bits)
+        )
+    {
+        m_reconstructVisitor->OnPaddingBitFieldField(*udtField, m_previousBitFieldField);
+    }
 }
 
 template <typename MEMBER_DEFINITION_TYPE>
-void PDBSymbolVisitor<MEMBER_DEFINITION_TYPE>::CheckForAnonymousUnion(const SYMBOL_UDT_FIELD* UdtField)
+void PDBSymbolVisitor<MEMBER_DEFINITION_TYPE>::CheckForAnonymousUnion(const SymbolUdtField* udtField)
 {
-	UdtFieldContext UdtFieldCtx(UdtField);
-	if (UdtFieldCtx.IsLast())
-		return;
+    UdtFieldContext UdtFieldCtx(udtField);
+    if (UdtFieldCtx.IsLast())
+        return;
 
-	if (!m_AnonymousUdtStack.empty() &&
-	     m_AnonymousUdtStack.top()->Kind == UdtUnion)
-	{
-		return;
-	}
+    if (!m_anonymousUdtStack.empty() &&
+        m_anonymousUdtStack.top()->kind == UdtUnion)
+    {
+        return;
+    }
 
-	do {
-		if (UdtFieldCtx.NextUdtField->Offset == UdtField->Offset
-			&& UdtFieldCtx.NextUdtField->Tag == SymTagData
-			&& UdtField->Tag == SymTagData
-			&& UdtFieldCtx.NextUdtField->DataKind != DataIsStaticMember
-			&& UdtField->DataKind != DataIsStaticMember
-			)
-		{
-			if (m_AnonymousStructStack.empty() ||
-			  (!m_AnonymousStructStack.empty() && UdtFieldCtx.NextUdtField <= m_AnonymousStructStack.top()->Last))
-			{
-				PushAnonymousUdt(std::make_shared<AnonymousUdt>(UdtUnion, UdtField, nullptr, UdtField->Type->Size));
-				m_ReconstructVisitor->OnAnonymousUdtBegin(UdtUnion, UdtField);
-				break;
-			}
-		}
-	} while (UdtFieldCtx.GetNext());
+    do {
+        if (UdtFieldCtx.nextUdtField->offset == udtField->offset
+            && UdtFieldCtx.nextUdtField->tag == SymTagData
+            && udtField->tag == SymTagData
+            && UdtFieldCtx.nextUdtField->dataKind != DataIsStaticMember
+            && udtField->dataKind != DataIsStaticMember
+            )
+        {
+            if (m_anonymousStructStack.empty() ||
+                (!m_anonymousStructStack.empty() && UdtFieldCtx.nextUdtField <= m_anonymousStructStack.top()->last))
+            {
+                PushAnonymousUdt(std::make_shared<AnonymousUdt>(UdtUnion, udtField, nullptr, udtField->type->size));
+                m_reconstructVisitor->OnAnonymousUdtBegin(UdtUnion, *udtField);
+                break;
+            }
+        }
+    } while (UdtFieldCtx.GetNext());
 }
 
 template <typename MEMBER_DEFINITION_TYPE>
-void PDBSymbolVisitor<MEMBER_DEFINITION_TYPE>::CheckForAnonymousStruct(const SYMBOL_UDT_FIELD* UdtField)
+void PDBSymbolVisitor<MEMBER_DEFINITION_TYPE>::CheckForAnonymousStruct(const SymbolUdtField* udtField)
 {
-	UdtFieldContext UdtFieldCtx(UdtField);
-	if (UdtFieldCtx.IsLast())
-		return;
+    UdtFieldContext UdtFieldCtx(udtField);
+    if (UdtFieldCtx.IsLast())
+        return;
 
-	if (!m_AnonymousUdtStack.empty() &&
-	     m_AnonymousUdtStack.top()->Kind != UdtUnion)
-	{
-		return;
-	}
+    if (!m_anonymousUdtStack.empty() &&
+        m_anonymousUdtStack.top()->kind != UdtUnion)
+    {
+        return;
+    }
 
-	if (UdtFieldCtx.NextUdtField->Offset <= UdtField->Offset)
-		return;
+    if (UdtFieldCtx.nextUdtField->offset <= udtField->offset)
+        return;
 
-	do {
-		if ((UdtFieldCtx.NextUdtField->Offset == UdtField->Offset ||
-		     (!m_AnonymousUdtStack.empty() &&
-		       UdtFieldCtx.NextUdtField->Offset < m_AnonymousUdtStack.top()->First->Offset + m_AnonymousUdtStack.top()->Size
-		     ))
-			&& UdtFieldCtx.NextUdtField->Tag == SymTagData
-			&& UdtField->Tag == SymTagData)
-		{
-			do {
-				bool IsEndOfAnonymousStruct =
-					UdtFieldCtx.IsLast() ||
-					UdtFieldCtx.NextUdtField->Offset <= UdtField->Offset;
+    do {
+        if ((UdtFieldCtx.nextUdtField->offset == udtField->offset ||
+             (!m_anonymousUdtStack.empty() &&
+              UdtFieldCtx.nextUdtField->offset < m_anonymousUdtStack.top()->first->offset + m_anonymousUdtStack.top()->size
+              ))
+            && UdtFieldCtx.nextUdtField->tag == SymTagData
+            && udtField->tag == SymTagData)
+        {
+            do {
+                bool IsEndOfAnonymousStruct =
+                    UdtFieldCtx.IsLast() ||
+                    UdtFieldCtx.nextUdtField->offset <= udtField->offset;
 
-				if (IsEndOfAnonymousStruct)
-					break;
-			} while (UdtFieldCtx.GetNext());
+                if (IsEndOfAnonymousStruct)
+                    break;
+            } while (UdtFieldCtx.GetNext());
 
-			PushAnonymousUdt(std::make_shared<AnonymousUdt>(UdtStruct, UdtField, UdtFieldCtx.CurrentUdtField));
-			m_ReconstructVisitor->OnAnonymousUdtBegin(UdtStruct, UdtField);
-			break;
-		}
-	} while (UdtFieldCtx.GetNext());
+            PushAnonymousUdt(std::make_shared<AnonymousUdt>(UdtStruct, udtField, UdtFieldCtx.currentUdtField));
+            m_reconstructVisitor->OnAnonymousUdtBegin(UdtStruct, *udtField);
+            break;
+        }
+    } while (UdtFieldCtx.GetNext());
 }
 
 template <typename MEMBER_DEFINITION_TYPE>
-void PDBSymbolVisitor<MEMBER_DEFINITION_TYPE>::CheckForEndOfAnonymousUdt(const SYMBOL_UDT_FIELD* UdtField)
+void PDBSymbolVisitor<MEMBER_DEFINITION_TYPE>::CheckForEndOfAnonymousUdt(const SymbolUdtField* udtField)
 {
-	m_PreviousUdtField       = ((UdtField->Tag == SymTagData
-				|| UdtField->Tag == SymTagBaseClass
-				|| UdtField->Tag == SymTagTypedef
-				) && UdtField->DataKind != DataIsStaticMember)
-		? UdtField : m_PreviousUdtField;
-	m_SizeOfPreviousUdtField = ((UdtField->Tag == SymTagData
-				|| UdtField->Tag == SymTagBaseClass
-				|| UdtField->Tag == SymTagTypedef
-				) && UdtField->DataKind != DataIsStaticMember)
-		? UdtField->Type->Size : m_SizeOfPreviousUdtField;
+    m_previousUdtField = ((udtField->tag == SymTagData
+                           || udtField->tag == SymTagBaseClass
+                           || udtField->tag == SymTagTypedef
+                           ) && udtField->dataKind != DataIsStaticMember)
+        ? udtField : m_previousUdtField;
+    m_sizeOfPreviousUdtField = ((udtField->tag == SymTagData
+                                 || udtField->tag == SymTagBaseClass
+                                 || udtField->tag == SymTagTypedef
+                                 ) && udtField->dataKind != DataIsStaticMember)
+        ? udtField->type->size : m_sizeOfPreviousUdtField;
 
-	if (m_AnonymousUdtStack.empty())
-		return;
+    if (m_anonymousUdtStack.empty())
+        return;
 
-	UdtFieldContext UdtFieldCtx(UdtField, FALSE);
+    UdtFieldContext UdtFieldCtx(udtField, FALSE);
 
-	AnonymousUdt* LastAnonymousUdt;
+    AnonymousUdt* LastAnonymousUdt;
 
-	do {
-		LastAnonymousUdt = m_AnonymousUdtStack.top().get();
-		LastAnonymousUdt->MemberCount += 1;
+    do {
+        LastAnonymousUdt = m_anonymousUdtStack.top().get();
+        LastAnonymousUdt->memberCount += 1;
 
-		bool IsEndOfAnonymousUdt = false;
+        bool IsEndOfAnonymousUdt = false;
 
-		if (LastAnonymousUdt->Kind == UdtUnion)
-		{
-			LastAnonymousUdt->Size = max(LastAnonymousUdt->Size, m_SizeOfPreviousUdtField);
+        if (LastAnonymousUdt->kind == UdtUnion)
+        {
+            LastAnonymousUdt->size = max(LastAnonymousUdt->size, m_sizeOfPreviousUdtField);
 
-			IsEndOfAnonymousUdt =
-			   UdtFieldCtx.IsLast() ||
-			   UdtFieldCtx.NextUdtField->Offset <  UdtField->Offset ||
-			  (UdtFieldCtx.NextUdtField->Offset == UdtField->Offset + LastAnonymousUdt->Size) ||
-			  (UdtFieldCtx.NextUdtField->Offset == UdtField->Offset + 8 && Is64BitBasicType(UdtFieldCtx.NextUdtField->Type)) ||
-			  (UdtFieldCtx.NextUdtField->Offset >  UdtField->Offset && UdtField->Bits != 0) ||
-			  (UdtFieldCtx.NextUdtField->Offset >  UdtField->Offset && UdtField->Offset + UdtField->Type->Size != UdtFieldCtx.NextUdtField->Offset);
-		} else
-		{
-			LastAnonymousUdt->Size += m_SizeOfPreviousUdtField;
+            IsEndOfAnonymousUdt =
+                UdtFieldCtx.IsLast() ||
+                UdtFieldCtx.nextUdtField->offset < udtField->offset ||
+                (UdtFieldCtx.nextUdtField->offset == udtField->offset + LastAnonymousUdt->size) ||
+                (UdtFieldCtx.nextUdtField->offset == udtField->offset + 8 && Is64BitBasicType(*UdtFieldCtx.nextUdtField->type)) ||
+                (UdtFieldCtx.nextUdtField->offset > udtField->offset && udtField->bits != 0) ||
+                (UdtFieldCtx.nextUdtField->offset > udtField->offset && udtField->offset + udtField->type->size != UdtFieldCtx.nextUdtField->offset);
+        }
+        else
+        {
+            LastAnonymousUdt->size += m_sizeOfPreviousUdtField;
 
-			IsEndOfAnonymousUdt =
-				UdtFieldCtx.IsLast() ||
-				UdtFieldCtx.NextUdtField->Offset <= UdtField->Offset;
+            IsEndOfAnonymousUdt =
+                UdtFieldCtx.IsLast() ||
+                UdtFieldCtx.nextUdtField->offset <= udtField->offset;
 
-			AnonymousUdt* LastAnonymousUnion =
-				m_AnonymousUnionStack.empty() ? nullptr : m_AnonymousUnionStack.top().get();
+            AnonymousUdt* LastAnonymousUnion =
+                m_anonymousUnionStack.empty() ? nullptr : m_anonymousUnionStack.top().get();
 
-			IsEndOfAnonymousUdt = IsEndOfAnonymousUdt || (
-			    LastAnonymousUnion != nullptr &&
-			   (LastAnonymousUnion->First->Offset + LastAnonymousUnion->Size == UdtField->Offset + UdtField->Type->Size ||
-			    LastAnonymousUnion->First->Offset + LastAnonymousUnion->Size == UdtFieldCtx.NextUdtField->Offset) &&
-			    LastAnonymousUdt->MemberCount >= 2
-			);
-		}
+            IsEndOfAnonymousUdt = IsEndOfAnonymousUdt || (
+                LastAnonymousUnion != nullptr &&
+                (LastAnonymousUnion->first->offset + LastAnonymousUnion->size == udtField->offset + udtField->type->size ||
+                 LastAnonymousUnion->first->offset + LastAnonymousUnion->size == UdtFieldCtx.nextUdtField->offset) &&
+                LastAnonymousUdt->memberCount >= 2
+                );
+        }
 
-		if (IsEndOfAnonymousUdt)
-		{
-			m_SizeOfPreviousUdtField = LastAnonymousUdt->Size;
-			LastAnonymousUdt->Last = UdtField;
+        if (IsEndOfAnonymousUdt)
+        {
+            m_sizeOfPreviousUdtField = LastAnonymousUdt->size;
+            LastAnonymousUdt->last = udtField;
 
-			m_ReconstructVisitor->OnAnonymousUdtEnd(
-				LastAnonymousUdt->Kind,
-				LastAnonymousUdt->First, LastAnonymousUdt->Last, LastAnonymousUdt->Size);
+            m_reconstructVisitor->OnAnonymousUdtEnd(
+                LastAnonymousUdt->kind,
+                *LastAnonymousUdt->first, *LastAnonymousUdt->last, LastAnonymousUdt->size);
 
-			PopAnonymousUdt();
+            PopAnonymousUdt();
 
-			LastAnonymousUdt = nullptr;
-		}
+            LastAnonymousUdt = nullptr;
+        }
 
-		if (!m_AnonymousUdtStack.empty())
-		{
-			if (m_AnonymousUdtStack.top()->Kind == UdtUnion)
-			{
-				UdtField = m_AnonymousUdtStack.top()->First;
-				m_PreviousUdtField = UdtField;
-			} else
-			{
-				UdtField = UdtFieldCtx.CurrentUdtField;
-				m_PreviousUdtField = UdtField;
-			}
-		}
-	} while (LastAnonymousUdt == nullptr && !m_AnonymousUdtStack.empty());
+        if (!m_anonymousUdtStack.empty())
+        {
+            if (m_anonymousUdtStack.top()->kind == UdtUnion)
+            {
+                udtField = m_anonymousUdtStack.top()->first;
+                m_previousUdtField = udtField;
+            }
+            else
+            {
+                udtField = UdtFieldCtx.currentUdtField;
+                m_previousUdtField = udtField;
+            }
+        }
+    } while (LastAnonymousUdt == nullptr && !m_anonymousUdtStack.empty());
 }
 
 template <typename MEMBER_DEFINITION_TYPE>
 std::shared_ptr<UdtFieldDefinitionBase> PDBSymbolVisitor<MEMBER_DEFINITION_TYPE>::MemberDefinitionFactory()
 {
-	auto MemberDefinition = std::make_shared<MEMBER_DEFINITION_TYPE>();
-	return MemberDefinition;
+    auto MemberDefinition = std::make_shared<MEMBER_DEFINITION_TYPE>();
+    return MemberDefinition;
 }
 
 template <typename MEMBER_DEFINITION_TYPE>
-void PDBSymbolVisitor<MEMBER_DEFINITION_TYPE>::PushAnonymousUdt(std::shared_ptr<AnonymousUdt> Item)
+void PDBSymbolVisitor<MEMBER_DEFINITION_TYPE>::PushAnonymousUdt(std::shared_ptr<AnonymousUdt> item)
 {
-	m_AnonymousUdtStack.push(Item);
-	if (Item->Kind == UdtUnion)
-		m_AnonymousUnionStack.push(Item);
-	else	m_AnonymousStructStack.push(Item);
+    m_anonymousUdtStack.push(item);
+    if (item->kind == UdtUnion)
+        m_anonymousUnionStack.push(item);
+    else	m_anonymousStructStack.push(item);
 }
 
 template <typename MEMBER_DEFINITION_TYPE>
 void PDBSymbolVisitor<MEMBER_DEFINITION_TYPE>::PopAnonymousUdt()
 {
-	if (m_AnonymousUdtStack.top()->Kind == UdtUnion)
-		m_AnonymousUnionStack.pop();
-	else	m_AnonymousStructStack.pop();
-	m_AnonymousUdtStack.pop();
+    if (m_anonymousUdtStack.top()->kind == UdtUnion)
+        m_anonymousUnionStack.pop();
+    else	m_anonymousStructStack.pop();
+    m_anonymousUdtStack.pop();
 }
 
 template <typename MEMBER_DEFINITION_TYPE>
-const SYMBOL_UDT_FIELD*
-PDBSymbolVisitor<MEMBER_DEFINITION_TYPE>::GetNextUdtFieldWithRespectToBitFields(const SYMBOL_UDT_FIELD* UdtField)
+const SymbolUdtField*
+PDBSymbolVisitor<MEMBER_DEFINITION_TYPE>::GetNextUdtFieldWithRespectToBitFields(const SymbolUdtField* udtField)
 {
-	const SYMBOL_UDT_FIELD* NextUdtField = UdtField;
+    const SymbolUdtField* nextUdtField = udtField;
 
-	while ((NextUdtField=UdtField->Parent->u.Udt.FindFieldNext(NextUdtField))
-			< UdtField->Parent->u.Udt.FieldLast())
-	{
-		if (NextUdtField->BitPosition == 0)
-		{
-			break;
-		}
-	}
-	return NextUdtField;
+    while ((nextUdtField = std::get<SymbolUdt>(udtField->parent->variant).FindFieldNext(nextUdtField))
+           < std::get<SymbolUdt>(udtField->parent->variant).FieldLast())
+    {
+        if (nextUdtField->bitPosition == 0)
+        {
+            break;
+        }
+    }
+    return nextUdtField;
 }
 
 template <typename MEMBER_DEFINITION_TYPE>
-bool PDBSymbolVisitor<MEMBER_DEFINITION_TYPE>::Is64BitBasicType(const SYMBOL* Symbol)
+bool PDBSymbolVisitor<MEMBER_DEFINITION_TYPE>::Is64BitBasicType(const Symbol& symbol)
 {
-	return (Symbol->Tag == SymTagBaseType && Symbol->Size == 8);
+    return (symbol.tag == SymTagBaseType && symbol.size == 8);
 }

@@ -2,13 +2,19 @@
 
 #pragma comment(lib, "dbghelp.lib")
 
-int main_impl(int argc, char** argv)
-{
-	PDBExtractor Instance;
-	return Instance.Run(argc, argv);
-}
-
 int main(int argc, char** argv)
 {
-	return main_impl(argc, argv);
+    int result = 0;
+
+    try
+    {
+        result = PDBExtractor{}.Run(argc, argv);
+    }
+    catch (const std::exception& e)
+    {
+        std::cerr << e.what() << std::endl;
+        result = 1;
+    }
+
+    return result;
 }

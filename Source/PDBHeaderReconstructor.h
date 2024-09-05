@@ -2,105 +2,87 @@
 #include "PDBReconstructorBase.h"
 
 #include <iostream>
-#include <numeric> // std::accumulate
-#include <string>
 #include <map>
 #include <set>
+#include <stack>
 
-#include <cassert>
-
-class PDBHeaderReconstructor
-	: public PDBReconstructorBase
+class PDBHeaderReconstructor : public PDBReconstructorBase
 {
 public:
-	enum class MemberStructExpansionType
-	{
-		None,
-		InlineUnnamed,
-		InlineAll,
-	};
+    enum class MemberStructExpansionType
+    {
+        None,
+        InlineUnnamed,
+        InlineAll,
+    };
 
-	struct Settings
-	{
-		Settings()
-		{
-			MemberStructExpansion       = MemberStructExpansionType::InlineUnnamed;
-			OutputFile                  = &std::cout;
-			PaddingMemberPrefix         = "Padding_";
-			BitFieldPaddingMemberPrefix = "";
-			AnonymousStructPrefix       = "s";  // DUMMYSTRUCTNAME (up to 6)
-			AnonymousUnionPrefix        = "u";  // DUMMYUNIONNAME  (up to 9)
-			CreatePaddingMembers        = true;
-			ShowOffsets                 = true;
-			AllowBitFieldsInUnion       = false;
-			AllowAnonymousDataTypes     = true;
-		}
+    struct Settings
+    {
+        MemberStructExpansionType memberStructExpansion = MemberStructExpansionType::InlineUnnamed;
+        std::unique_ptr<std::ostream> outputFile;
+        std::reference_wrapper<std::ostream> output = std::cout;
+        std::string paddingMemberPrefix = "Padding_";
+        std::string bitFieldPaddingMemberPrefix;
+        std::string unnamedTypePrefix;
+        std::string symbolPrefix;
+        std::string symbolSuffix;
+        std::string anonymousStructPrefix = "s";
+        std::string anonymousUnionPrefix = "u";
+        bool createPaddingMembers = true;
+        bool showOffsets = true;
+        bool allowBitFieldsInUnion = false;
+        bool allowAnonymousDataTypes = true;
+    };
 
-		MemberStructExpansionType MemberStructExpansion;
-		std::ostream*             OutputFile;
-		std::string               PaddingMemberPrefix;
-		std::string               BitFieldPaddingMemberPrefix;
-		std::string               UnnamedTypePrefix;
-		std::string               SymbolPrefix;
-		std::string               SymbolSuffix;
-		std::string               AnonymousStructPrefix;
-		std::string               AnonymousUnionPrefix;
-		bool                      CreatePaddingMembers    : 1;
-		bool                      ShowOffsets             : 1;
-		bool                      AllowBitFieldsInUnion   : 1;
-		bool                      AllowAnonymousDataTypes : 1;
-	};
-
-	PDBHeaderReconstructor(Settings* VisitorSettings = nullptr);
-
-	void Clear();
-
-	const std::string& GetCorrectedSymbolName(const SYMBOL* Symbol) const;
+    PDBHeaderReconstructor(Settings& visitorSettings);
+    void Clear();
+    const std::string& GetCorrectedSymbolName(const Symbol& symbol) const;
 
 protected:
-	bool OnEnumType(const SYMBOL* Symbol) override;
-	void OnEnumTypeBegin(const SYMBOL* Symbol) override;
-	void OnEnumTypeEnd(const SYMBOL* Symbol) override;
-	void OnEnumField(const SYMBOL_ENUM_FIELD* EnumField) override;
+    bool OnEnumType(const Symbol& symbol) override;
+    void OnEnumTypeBegin(const Symbol& symbol) override;
+    void OnEnumTypeEnd(const Symbol& symbol) override;
+    void OnEnumField(const SymbolEnumField& enumField) override;
 
-	bool OnUdt(const SYMBOL* Symbol) override;
-	void OnUdtBegin(const SYMBOL* Symbol) override;
-	void OnUdtEnd(const SYMBOL* Symbol) override;
+    bool OnUdt(const Symbol& symbol) override;
+    void OnUdtBegin(const Symbol& symbol) override;
+    void OnUdtEnd(const Symbol& symbol) override;
 
-	void OnUdtFieldBegin(const SYMBOL_UDT_FIELD* UdtField) override;
-	void OnUdtFieldEnd(const SYMBOL_UDT_FIELD* UdtField) override;
-	void OnUdtField(const SYMBOL_UDT_FIELD* UdtField, UdtFieldDefinitionBase* MemberDefinition) override;
+    void OnUdtFieldBegin(const SymbolUdtField& udtField) override;
+    void OnUdtFieldEnd(const SymbolUdtField& udtField) override;
+    void OnUdtField(const SymbolUdtField& udtField, UdtFieldDefinitionBase& memberDefinition) override;
 
-	void OnAnonymousUdtBegin(UdtKind Kind, const SYMBOL_UDT_FIELD* First) override;
-	void OnAnonymousUdtEnd(UdtKind Kind, const SYMBOL_UDT_FIELD* First, const SYMBOL_UDT_FIELD* Last, DWORD Size) override;
+    void OnAnonymousUdtBegin(UdtKind kind, const SymbolUdtField& first) override;
+    void OnAnonymousUdtEnd(UdtKind kind, const SymbolUdtField& first, const SymbolUdtField& last, DWORD size) override;
 
-	void OnUdtFieldBitFieldBegin(const SYMBOL_UDT_FIELD* First, const SYMBOL_UDT_FIELD* Last) override;
-	void OnUdtFieldBitFieldEnd(const SYMBOL_UDT_FIELD* First, const SYMBOL_UDT_FIELD* Last) override;
+    void OnUdtFieldBitFieldBegin(const SymbolUdtField& first, const SymbolUdtField& last) override;
+    void OnUdtFieldBitFieldEnd(const SymbolUdtField& first, const SymbolUdtField& last) override;
 
-	void OnPaddingMember(const SYMBOL_UDT_FIELD* UdtField, BasicType PaddingBasicType, DWORD PaddingBasicTypeSize, DWORD PaddingSize) override;
-
-	void OnPaddingBitFieldField(const SYMBOL_UDT_FIELD* UdtField, const SYMBOL_UDT_FIELD* PreviousUdtField) override;
-private:
-	void Write(const char* Format, ...);
-	void WriteIndent();
-	void WriteVariant(const VARIANT* v);
-	void WriteUnnamedDataType(UdtKind Kind);
-	void WriteConstAndVolatile(const SYMBOL* Symbol);
-	void WriteOffset(const SYMBOL_UDT_FIELD* UdtField, int PaddingOffset);
-	bool HasBeenVisited(const SYMBOL* Symbol) const;
-	void MarkAsVisited(const SYMBOL* Symbol);
-	DWORD GetParentOffset() const;
-	bool ShouldExpand(const SYMBOL* Symbol) const;
+    void OnPaddingMember(const SymbolUdtField& udtField, BasicType paddingBasicType, DWORD paddingBasicTypeSize, DWORD paddingSize) override;
+    void OnPaddingBitFieldField(const SymbolUdtField& udtField, const SymbolUdtField* previousUdtField) override;
 
 private:
-	Settings* m_Settings;
+    void Write(const char* format, ...);
+    void WriteIndent();
+    void WriteVariant(const VARIANT& v);
+    void WriteUnnamedDataType(UdtKind kind);
+    void WriteConstAndVolatile(const Symbol& symbol);
+    void WriteOffset(const SymbolUdtField& udtField, int paddingOffset);
+    bool HasBeenVisited(const Symbol& symbol) const;
+    void MarkAsVisited(const Symbol& symbol);
+    DWORD GetParentOffset() const;
+    bool ShouldExpand(const Symbol& symbol) const;
 
-	std::vector<DWORD> m_OffsetStack;
-	DWORD m_Depth = 0;
-	DWORD m_AnonymousDataTypeCounter = 0;
-	DWORD m_PaddingMemberCounter = 0;
+private:
+    Settings& m_settings;
 
-	mutable std::map<const SYMBOL*, std::string> m_CorrectedSymbolNames;
+    std::vector<DWORD> m_offsetStack;
+    std::stack<DWORD> m_accessStack;
+    DWORD m_depth = 0;
+    DWORD m_anonymousDataTypeCounter = 0;
+    DWORD m_paddingMemberCounter = 0;
 
-	std::set<std::string> m_VisitedSymbols;
+    mutable std::map<DWORD, std::string> m_correctedSymbolNames;
+
+    std::set<std::string> m_visitedSymbols;
 };

@@ -14,8 +14,7 @@ namespace
 	static const char* MESSAGE_FILE_NOT_FOUND = "File not found";
 	static const char* MESSAGE_SYMBOL_NOT_FOUND = "Symbol not found";
 
-	class PDBDumperException
-		: public std::runtime_error
+	class PDBDumperException : public std::runtime_error
 	{
 	public:
 		PDBDumperException(const char* Message)
@@ -28,49 +27,49 @@ namespace
 
 int PDBExtractor::Run(int argc, char** argv)
 {
-	int Result = ERROR_SUCCESS;
+	int result = 0;
 
-	try {
+	try
+	{
 		ParseParameters(argc, argv);
 		OpenPDBFile();
 		DumpAllSymbols();
-	} catch (const PDBDumperException& e)
+	}
+	catch (const PDBDumperException& e)
 	{
 		std::cerr << e.what() << std::endl;
-		Result = EXIT_FAILURE;
+		result = 1;
 	}
 
-	CloseOpenFiles();
-
-	return Result;
+	return result;
 }
 
 void PDBExtractor::PrintUsage()
 {
-	printf("Extracts types and structures from PDB (Program database).\n");
-	printf("\n");
-	printf("pdbex <path> [-o <filename>] [-e <type>]\n");
-	printf("                     [-u <prefix>] [-s prefix] [-r prefix] [-g suffix]\n");
-	printf("                     [-p] [-x] [-b] [-d]\n");
-	printf("\n");
-	printf("<path>               Path to the PDB file.\n");
-	printf(" -o filename         Specifies the output file.                       (stdout)\n");
-	printf(" -e [n,i,a]          Specifies expansion of nested structures/unions. (i)\n");
-	printf("                       n = none            Only top-most type is printed.\n");
-	printf("                       i = inline unnamed  Unnamed types are nested.\n");
-	printf("                       a = inline all      All types are nested.\n");
-	printf(" -u prefix           Unnamed union prefix  (in combination with -d).\n");
-	printf(" -s prefix           Unnamed struct prefix (in combination with -d).\n");
-	printf(" -r prefix           Prefix for all symbols.\n");
-	printf(" -g suffix           Suffix for all symbols.\n");
-	printf("\n");
-	printf("Following options can be explicitly turned off by adding trailing '-'.\n");
-	printf("Example: -p-\n");
-	printf(" -p                  Create padding members.                          (T)\n");
-	printf(" -x                  Show offsets.                                    (T)\n");
-	printf(" -b                  Allow bitfields in union.                        (F)\n");
-	printf(" -d                  Allow unnamed data types.                        (T)\n");
-	printf("\n");
+	std::cout << ("Extracts types and structures from PDB (Program database).\n");
+	std::cout << ("\n");
+	std::cout << ("pdbex <path> [-o <filename>] [-e <type>]\n");
+	std::cout << ("                     [-u <prefix>] [-s prefix] [-r prefix] [-g suffix]\n");
+	std::cout << ("                     [-p] [-x] [-b] [-d]\n");
+	std::cout << ("\n");
+	std::cout << ("<path>               Path to the PDB file.\n");
+	std::cout << (" -o filename         Specifies the output file.                       (stdout)\n");
+	std::cout << (" -e [n,i,a]          Specifies expansion of nested structures/unions. (i)\n");
+	std::cout << ("                       n = none            Only top-most type is printed.\n");
+	std::cout << ("                       i = inline unnamed  Unnamed types are nested.\n");
+	std::cout << ("                       a = inline all      All types are nested.\n");
+	std::cout << (" -u prefix           Unnamed union prefix  (in combination with -d).\n");
+	std::cout << (" -s prefix           Unnamed struct prefix (in combination with -d).\n");
+	std::cout << (" -r prefix           Prefix for all symbols.\n");
+	std::cout << (" -g suffix           Suffix for all symbols.\n");
+	std::cout << ("\n");
+	std::cout << ("Following options can be explicitly turned off by adding trailing '-'.\n");
+	std::cout << ("Example: -p-\n");
+	std::cout << (" -p                  Create padding members.                          (T)\n");
+	std::cout << (" -x                  Show offsets.                                    (T)\n");
+	std::cout << (" -b                  Allow bitfields in union.                        (F)\n");
+	std::cout << (" -d                  Allow unnamed data types.                        (T)\n");
+	std::cout << ("\n");
 }
 
 void PDBExtractor::ParseParameters(int argc, char** argv)
@@ -80,118 +79,126 @@ void PDBExtractor::ParseParameters(int argc, char** argv)
 	    (argc == 2 && strcmp(argv[1], "--help") == 0))
 	{
 		PrintUsage();
-		exit(EXIT_SUCCESS);
+		std::exit(0);
 	}
 
-	int ArgumentPointer = 0;
+	int argumentPointer = 0;
 
-	m_Settings.PdbPath = argv[++ArgumentPointer];
+	m_settings.pdbPath = argv[++argumentPointer];
 
-	while (++ArgumentPointer < argc)
+	while (++argumentPointer < argc)
 	{
-		const char* CurrentArgument = argv[ArgumentPointer];
-		size_t CurrentArgumentLength = strlen(CurrentArgument);
+		const std::string currentArgument = argv[argumentPointer];
+		const std::string nextArgument = argumentPointer < argc ? argv[argumentPointer + 1] : std::string{};
 
-		const char* NextArgument = ArgumentPointer < argc ? argv[ArgumentPointer + 1] : nullptr;
-		size_t NextArgumentLength = NextArgument ? strlen(CurrentArgument) : 0;
-
-		if ((CurrentArgumentLength != 2 && CurrentArgumentLength != 3) ||
-		    (CurrentArgumentLength == 2 && CurrentArgument[0] != '-') ||
-		    (CurrentArgumentLength == 3 && CurrentArgument[0] != '-' && CurrentArgument[2] != '-'))
+		if ((currentArgument.size() != 2 && currentArgument.size() != 3) ||
+		    (currentArgument.size() == 2 && currentArgument[0] != '-') ||
+		    (currentArgument.size() == 3 && currentArgument[0] != '-' && currentArgument[2] != '-'))
 		{
 			throw PDBDumperException(MESSAGE_INVALID_PARAMETERS);
 		}
 
-		bool OffSwitch = CurrentArgumentLength == 3 && CurrentArgument[2] == '-';
+		bool offSwitch = currentArgument.size() == 3 && currentArgument[2] == '-';
 
-		switch (CurrentArgument[1])
+		switch (currentArgument[1])
 		{
 		case 'o':
-			if (!NextArgument)
+			if (nextArgument.empty())
+			{
 				throw PDBDumperException(MESSAGE_INVALID_PARAMETERS);
+			}
 
-			++ArgumentPointer;
-			m_Settings.OutputFilename = NextArgument;
-
-			m_Settings.PdbHeaderReconstructorSettings.OutputFile = new std::ofstream(
-				NextArgument, std::ios::out);
+			++argumentPointer;
+			m_settings.outputFilename = nextArgument;
+			m_settings.pdbHeaderReconstructorSettings.outputFile = std::make_unique<std::ofstream>(nextArgument, std::ios::out);
+			m_settings.pdbHeaderReconstructorSettings.output = *m_settings.pdbHeaderReconstructorSettings.outputFile;
 			break;
 
 		case 'e':
-			if (!NextArgument)
+			if (nextArgument.empty())
+			{
 				throw PDBDumperException(MESSAGE_INVALID_PARAMETERS);
+			}
 
-			++ArgumentPointer;
-			switch (NextArgument[0])
+			++argumentPointer;
+			switch (nextArgument[0])
 			{
 			case 'n':
-				m_Settings.PdbHeaderReconstructorSettings.MemberStructExpansion =
+				m_settings.pdbHeaderReconstructorSettings.memberStructExpansion =
 					PDBHeaderReconstructor::MemberStructExpansionType::None;
 				break;
 
 			case 'i':
-				m_Settings.PdbHeaderReconstructorSettings.MemberStructExpansion =
+				m_settings.pdbHeaderReconstructorSettings.memberStructExpansion =
 					PDBHeaderReconstructor::MemberStructExpansionType::InlineUnnamed;
 				break;
 
 			case 'a':
-				m_Settings.PdbHeaderReconstructorSettings.MemberStructExpansion =
+				m_settings.pdbHeaderReconstructorSettings.memberStructExpansion =
 					PDBHeaderReconstructor::MemberStructExpansionType::InlineAll;
 				break;
 
 			default:
-				m_Settings.PdbHeaderReconstructorSettings.MemberStructExpansion =
+				m_settings.pdbHeaderReconstructorSettings.memberStructExpansion =
 					PDBHeaderReconstructor::MemberStructExpansionType::InlineUnnamed;
 				break;
 			}
 			break;
 
 		case 'u':
-			if (!NextArgument)
+			if (nextArgument.empty())
+			{
 				throw PDBDumperException(MESSAGE_INVALID_PARAMETERS);
+			}
 
-			++ArgumentPointer;
-			m_Settings.PdbHeaderReconstructorSettings.AnonymousUnionPrefix = NextArgument;
+			++argumentPointer;
+			m_settings.pdbHeaderReconstructorSettings.anonymousUnionPrefix = nextArgument;
 			break;
 
 		case 's':
-			if (!NextArgument)
+			if (nextArgument.empty())
+			{
 				throw PDBDumperException(MESSAGE_INVALID_PARAMETERS);
+			}
 
-			++ArgumentPointer;
-			m_Settings.PdbHeaderReconstructorSettings.AnonymousStructPrefix = NextArgument;
+			++argumentPointer;
+			m_settings.pdbHeaderReconstructorSettings.anonymousStructPrefix = nextArgument;
 			break;
 
 		case 'r':
-			if (!NextArgument)
+			if (nextArgument.empty())
+			{
 				throw PDBDumperException(MESSAGE_INVALID_PARAMETERS);
+			}
 
-			++ArgumentPointer;
-			m_Settings.PdbHeaderReconstructorSettings.SymbolPrefix = NextArgument;
+			++argumentPointer;
+			m_settings.pdbHeaderReconstructorSettings.symbolPrefix = nextArgument;
 			break;
 
 		case 'g':
-			if (!NextArgument)
+			if (nextArgument.empty())
+			{
 				throw PDBDumperException(MESSAGE_INVALID_PARAMETERS);
+			}
 
-			++ArgumentPointer;
-			m_Settings.PdbHeaderReconstructorSettings.SymbolSuffix = NextArgument;
+			++argumentPointer;
+			m_settings.pdbHeaderReconstructorSettings.symbolSuffix = nextArgument;
 			break;
 
 		case 'p':
-			m_Settings.PdbHeaderReconstructorSettings.CreatePaddingMembers = !OffSwitch;
+			m_settings.pdbHeaderReconstructorSettings.createPaddingMembers = !offSwitch;
 			break;
 
 		case 'x':
-			m_Settings.PdbHeaderReconstructorSettings.ShowOffsets = !OffSwitch;
+			m_settings.pdbHeaderReconstructorSettings.showOffsets = !offSwitch;
 			break;
 
 		case 'b':
-			m_Settings.PdbHeaderReconstructorSettings.AllowBitFieldsInUnion = !OffSwitch;
+			m_settings.pdbHeaderReconstructorSettings.allowBitFieldsInUnion = !offSwitch;
 			break;
 
 		case 'd':
-			m_Settings.PdbHeaderReconstructorSettings.AllowAnonymousDataTypes = !OffSwitch;
+			m_settings.pdbHeaderReconstructorSettings.allowAnonymousDataTypes = !offSwitch;
 			break;
 
 		default:
@@ -199,64 +206,63 @@ void PDBExtractor::ParseParameters(int argc, char** argv)
 		}
 	}
 
-	m_HeaderReconstructor = std::make_unique<PDBHeaderReconstructor>(&m_Settings.PdbHeaderReconstructorSettings);
-	m_SymbolVisitor = std::make_unique<PDBSymbolVisitor<UdtFieldDefinition>>(m_HeaderReconstructor.get());
-	m_SymbolSorter = std::make_unique<PDBSymbolSorter>();
+	m_headerReconstructor = std::make_unique<PDBHeaderReconstructor>(m_settings.pdbHeaderReconstructorSettings);
+	m_symbolVisitor = std::make_unique<PDBSymbolVisitor<UdtFieldDefinition>>(m_headerReconstructor.get());
+	m_symbolSorter = std::make_unique<PDBSymbolSorter>();
 }
 
 void PDBExtractor::OpenPDBFile()
 {
-	if (m_PDB.Open(m_Settings.PdbPath.c_str()) == FALSE)
+	if (!m_pdb.Open(m_settings.pdbPath))
+	{
 		throw PDBDumperException(MESSAGE_FILE_NOT_FOUND);
+	}
 }
 
 void PDBExtractor::PrintPDBDefinitions()
 {
-	for (auto&& e : m_SymbolSorter->GetSortedSymbols())
+	for (const auto& symIndex : m_symbolSorter->GetSortedSymbolIndexes())
 	{
-		bool Expand = true;
+		bool expand = true;
 
-		if (m_Settings.PdbHeaderReconstructorSettings.MemberStructExpansion == PDBHeaderReconstructor::MemberStructExpansionType::InlineUnnamed &&
-		    e->Tag == SymTagUDT &&
-		    PDB::IsUnnamedSymbol(e))
+		auto symbol = m_pdb.GetSymbolBySymbolIndex(symIndex);
+		assert(symbol);
+
+		if (m_settings.pdbHeaderReconstructorSettings.memberStructExpansion ==
+		    PDBHeaderReconstructor::MemberStructExpansionType::InlineUnnamed &&
+		    symbol->tag == SymTagUDT &&
+		    PDB::IsUnnamedSymbol(*symbol))
 		{
-			Expand = false;
+			expand = false;
 		}
 
-		if (Expand)
+		if (expand)
 		{
-			m_SymbolVisitor->Run(e);
+			m_symbolVisitor->Run(*symbol);
 		}
 	}
 }
 
 void PDBExtractor::PrintPDBFunctions()
 {
-	*m_Settings.PdbHeaderReconstructorSettings.OutputFile << "/*" << std::endl;
+	m_settings.pdbHeaderReconstructorSettings.output.get() << "/*" << std::endl;
 
-	for (auto&& e : m_PDB.GetFunctionSet())
+	for (const auto& func : m_pdb.GetFunctionSet())
 	{
-		*m_Settings.PdbHeaderReconstructorSettings.OutputFile << e << std::endl;
+		m_settings.pdbHeaderReconstructorSettings.output.get() << func << std::endl;
 	}
 
-	*m_Settings.PdbHeaderReconstructorSettings.OutputFile << "*/" << std::endl;
+	m_settings.pdbHeaderReconstructorSettings.output.get() << "*/" << std::endl;
 }
 
 void PDBExtractor::DumpAllSymbols()
 {
-	for (auto&& e : m_PDB.GetSymbolMap())
+	for (const auto&[_, symbol] : m_pdb.GetSymbolMap())
 	{
-		m_SymbolSorter->Visit(e.second);
+		assert(symbol);
+		m_symbolSorter->Visit(*symbol);
 	}
 
 	PrintPDBDefinitions();
 	PrintPDBFunctions();
-}
-
-void PDBExtractor::CloseOpenFiles()
-{
-	if (m_Settings.OutputFilename)
-	{
-		delete m_Settings.PdbHeaderReconstructorSettings.OutputFile;
-	}
 }

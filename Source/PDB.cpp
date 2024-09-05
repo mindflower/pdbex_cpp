@@ -1,983 +1,952 @@
 #include "PDB.h"
 #include "PDBCallback.h"
 
-#include <dia2.h>       // IDia* interfaces
-
 #include <cassert>
-
-#include <string>
-#include <memory>
-
-class SymbolModuleBase
-{
-public:
-	SymbolModuleBase();
-
-	BOOL Open(IN const CHAR* Path);
-	VOID Close();
-	BOOL IsOpen() const { return m_DataSource && m_Session && m_GlobalSymbol; }
-
-private:
-	HRESULT LoadDiaViaCoCreateInstance();
-	HRESULT LoadDiaViaLoadLibrary();
-
-protected:
-	IDiaDataSource *m_DataSource;
-	IDiaSession    *m_Session;
-	IDiaSymbol     *m_GlobalSymbol;
-};
+#include <functional>
 
 SymbolModuleBase::SymbolModuleBase()
 {
-	HRESULT hr = CoInitialize(nullptr);
-	assert(hr == S_OK);
+    HRESULT hr = CoInitialize(nullptr);
+    assert(hr == S_OK);
 }
 
 HRESULT SymbolModuleBase::LoadDiaViaCoCreateInstance()
 {
-	return CoCreateInstance(
-		__uuidof(DiaSource),
-		nullptr,
-		CLSCTX_INPROC_SERVER,
-		__uuidof(IDiaDataSource),
-		(void**)& m_DataSource
-		);
+    return CoCreateInstance(
+        __uuidof(DiaSource),
+        nullptr,
+        CLSCTX_INPROC_SERVER,
+        __uuidof(IDiaDataSource),
+        (void**)&m_dataSource
+    );
 }
 
 HRESULT SymbolModuleBase::LoadDiaViaLoadLibrary()
 {
-	HRESULT Result;
-	HMODULE Module = LoadLibrary(TEXT("msdia140.dll"));
-	if (!Module)
-	{
-		Result = HRESULT_FROM_WIN32(GetLastError());
-		return Result;
-	}
+    HRESULT result = S_OK;
+    HMODULE module = LoadLibrary(TEXT("msdia140.dll"));
+    if (!module)
+    {
+        result = HRESULT_FROM_WIN32(GetLastError());
+        return result;
+    }
 
-	using PDLLGETCLASSOBJECT_ROUTINE = HRESULT(WINAPI*)(REFCLSID, REFIID, LPVOID);
-	auto DllGetClassObject = reinterpret_cast<PDLLGETCLASSOBJECT_ROUTINE>(GetProcAddress(Module, "DllGetClassObject"));
-	if (!DllGetClassObject)
-	{
-		Result = HRESULT_FROM_WIN32(GetLastError());
-		return Result;
-	}
+    using PDLLGETCLASSOBJECT_ROUTINE = HRESULT(WINAPI*)(REFCLSID, REFIID, LPVOID);
+    auto dllGetClassObject = reinterpret_cast<PDLLGETCLASSOBJECT_ROUTINE>(GetProcAddress(module, "DllGetClassObject"));
+    if (!dllGetClassObject)
+    {
+        result = HRESULT_FROM_WIN32(GetLastError());
+        return result;
+    }
 
-	IClassFactory *ClassFactory;
-	Result = DllGetClassObject(__uuidof(DiaSource), __uuidof(IClassFactory), &ClassFactory);
-	if (FAILED(Result))
-	{
-		return Result;
-	}
+    IClassFactory* classFactory;
+    result = dllGetClassObject(__uuidof(DiaSource), __uuidof(IClassFactory), &classFactory);
+    if (FAILED(result))
+    {
+        return result;
+    }
 
-	return ClassFactory->CreateInstance(nullptr, __uuidof(IDiaDataSource), (void**)& m_DataSource);
+    return classFactory->CreateInstance(nullptr, __uuidof(IDiaDataSource), (void**)&m_dataSource);
 }
 
-BOOL SymbolModuleBase::Open(IN const CHAR* Path)
+bool SymbolModuleBase::Open(const std::filesystem::path& path)
 {
-	HRESULT   Result            = S_OK;
-	LPCOLESTR PDBSearchPath     = L"srv*.\\Symbols*https://msdl.microsoft.com/download/symbols";
+    HRESULT result = S_OK;
 
-	if (FAILED(Result = LoadDiaViaCoCreateInstance()) &&
-	    FAILED(Result = LoadDiaViaLoadLibrary()))
-	{
-		return FALSE;
-	}
+    if (FAILED(result = LoadDiaViaCoCreateInstance()) &&
+        FAILED(result = LoadDiaViaLoadLibrary()))
+    {
+        return false;
+    }
 
-	int PathUnicodeLength = MultiByteToWideChar(CP_UTF8, 0, Path, -1, NULL, 0);
-	auto PathUnicode       = std::make_unique<WCHAR[]>(PathUnicodeLength);
-	MultiByteToWideChar(CP_UTF8, 0, Path, -1, PathUnicode.get(), PathUnicodeLength);
+    if (path.extension() == ".pdb")
+    {
+        result = m_dataSource->loadDataFromPdb(path.c_str());
+    }
+    else
+    {
+        PDBCallback callback;
+        callback.AddRef();
 
-	WCHAR FileExtension[8] = { 0 };
-	_wsplitpath_s(PathUnicode.get(),
-		nullptr, 0,
-		nullptr, 0,
-		nullptr, 0, FileExtension,
-		_countof(FileExtension));
+        result = m_dataSource->loadDataForExe(path.c_str(), L"srv*.\\Symbols*https://msdl.microsoft.com/download/symbols", &callback);
+    }
 
-	if (_wcsicmp(FileExtension, L".pdb") == 0)
-	{
-		Result = m_DataSource->loadDataFromPdb(PathUnicode.get());
-	} else
-	{
-		PDBCallback Callback;
-		Callback.AddRef();
+    if (FAILED(result))
+    {
+        Close();
+        return false;
+    }
 
-		Result = m_DataSource->loadDataForExe(PathUnicode.get(), PDBSearchPath, &Callback);
-	}
+    result = m_dataSource->openSession(&m_session);
+    if (FAILED(result))
+    {
+        Close();
+        return false;
+    }
 
-	if (FAILED(Result))
-	{
-		Close();
-		return FALSE;
-	}
+    result = m_session->get_globalScope(&m_globalSymbol);
+    if (FAILED(result))
+    {
+        Close();
+        return false;
+    }
 
-	Result = m_DataSource->openSession(&m_Session);
-	if (FAILED(Result))
-	{
-		Close();
-		return FALSE;
-	}
-
-	Result = m_Session->get_globalScope(&m_GlobalSymbol);
-	if (FAILED(Result))
-	{
-		Close();
-		return FALSE;
-	}
-
-	return TRUE;
+    return true;
 }
 
-VOID SymbolModuleBase::Close()
+void SymbolModuleBase::Close()
 {
-	if (m_GlobalSymbol != NULL)
-	{
-		m_GlobalSymbol->Release();
-		m_GlobalSymbol = NULL;
-	}
+    m_globalSymbol.Release();
+    m_session.Release();
+    m_dataSource.Release();
 
-	if (m_Session != NULL)
-	{
-		m_Session->Release();
-		m_Session = NULL;
-	}
-
-	if (m_DataSource != NULL)
-	{
-		m_DataSource->Release();
-		m_DataSource = NULL;
-	}
-
-	CoUninitialize();
+    CoUninitialize();
 }
 
-class SymbolModule
-	: public SymbolModuleBase
+bool SymbolModuleBase::IsOpen() const
 {
-public:
-	SymbolModule();
-	~SymbolModule();
-
-	BOOL Open(IN const CHAR* Path);
-	BOOL IsOpen() const { return SymbolModuleBase::IsOpen(); }
-	const CHAR* GetPath() const { return m_Path.c_str(); }
-	VOID Close();
-	DWORD GetMachineType() const { return m_MachineType; }
-	CV_CFL_LANG GetLanguage() const { return m_Language; }
-	SYMBOL*	GetSymbolByName(IN const CHAR* SymbolName);
-	SYMBOL* GetSymbolByTypeId(IN DWORD TypeId);
-	SYMBOL* GetSymbol(IN IDiaSymbol* DiaSymbol);
-	CHAR* GetSymbolName(IN IDiaSymbol* DiaSymbol, bool raw = true);
-	VOID UpdateSymbolMapFromEnumerator(IN IDiaEnumSymbols* DiaSymbolEnumerator);
-	VOID BuildSymbolMapFromEnumerator(IN IDiaEnumSymbols* DiaSymbolEnumerator);
-	VOID BuildFunctionSetFromEnumerator(IN IDiaEnumSymbols* DiaSymbolEnumerator);
-	VOID BuildSymbolMap();
-	const SymbolMap& GetSymbolMap() const { return m_SymbolMap; }
-	const SymbolNameMap& GetSymbolNameMap() const { return m_SymbolNameMap; }
-	const FunctionSet& GetFunctionSet() const { return m_FunctionSet; }
-
-private:
-	VOID InitSymbol(IN IDiaSymbol* DiaSymbol, IN SYMBOL* Symbol);
-	VOID DestroySymbol(IN SYMBOL* Symbol);
-	VOID ProcessSymbolBase(IN IDiaSymbol* DiaSymbol, IN SYMBOL* Symbol);
-	VOID ProcessSymbolEnum(IN IDiaSymbol* DiaSymbol, IN SYMBOL* Symbol);
-	VOID ProcessSymbolTypedef(IN IDiaSymbol* DiaSymbol, IN SYMBOL* Symbol);
-	VOID ProcessSymbolPointer(IN IDiaSymbol* DiaSymbol, IN SYMBOL* Symbol);
-	VOID ProcessSymbolArray(IN IDiaSymbol* DiaSymbol, IN SYMBOL* Symbol);
-	VOID ProcessSymbolFunction(IN IDiaSymbol* DiaSymbol, IN SYMBOL* Symbol);
-	VOID ProcessSymbolFunctionArg(IN IDiaSymbol* DiaSymbol, IN SYMBOL* Symbol);
-	VOID ProcessSymbolUdt(IN IDiaSymbol* DiaSymbol, IN SYMBOL* Symbol);
-	VOID ProcessSymbolFunctionEx(IN IDiaSymbol* DiaSymbol, IN SYMBOL* Symbol);
-
-private:
-	std::string   m_Path;
-	SymbolMap     m_SymbolMap;
-	SymbolNameMap m_SymbolNameMap;
-	SymbolSet     m_SymbolSet;
-	FunctionSet   m_FunctionSet;
-
-	DWORD         m_MachineType = 0;
-	CV_CFL_LANG   m_Language = CV_CFL_C;
-};
-
-SymbolModule::SymbolModule()
-{
-
+    return m_dataSource && m_session && m_globalSymbol;
 }
 
 SymbolModule::~SymbolModule()
 {
-	Close();
+    Close();
 }
 
-BOOL SymbolModule::Open(IN const CHAR* Path)
+bool SymbolModule::Open(const std::filesystem::path& path)
 {
-	BOOL Result;
+    if (!SymbolModuleBase::Open(path))
+    {
+        return false;
+    }
 
-	Result = SymbolModuleBase::Open(Path);
-	if (Result == FALSE)
-		return FALSE;
+    m_globalSymbol->get_machineType(&m_machineType);
 
-	m_GlobalSymbol->get_machineType(&m_MachineType);
+    DWORD language = 0;
+    m_globalSymbol->get_language(&language);
+    m_language = static_cast<CV_CFL_LANG>(language);
 
-	DWORD Language;
-	m_GlobalSymbol->get_language(&Language);
-	m_Language = static_cast<CV_CFL_LANG>(Language);
-
-	BuildSymbolMap();
-
-	return TRUE;
+    BuildSymbolMap();
+    return true;
 }
 
-VOID SymbolModule::Close()
+void SymbolModule::Close()
 {
-	SymbolModuleBase::Close();
+    SymbolModuleBase::Close();
 
-	for (auto&& Symbol : m_SymbolSet)
-	{
-		DestroySymbol(Symbol);
-		delete Symbol;
-	}
-
-	m_Path.clear();
-	m_SymbolMap.clear();
-	m_SymbolNameMap.clear();
-	m_SymbolSet.clear();
+    m_path.clear();
+    m_symbolMap.clear();
+    m_symbolNameMap.clear();
+    m_symbolSet.clear();
 }
 
-CHAR* SymbolModule::GetSymbolName(IN IDiaSymbol* DiaSymbol, bool raw)
+const std::filesystem::path& SymbolModule::GetPath() const
 {
-	BSTR SymbolNameBstr;
-
-	if (raw || (DiaSymbol->get_undecoratedName(&SymbolNameBstr) != S_OK)) {
-		if (DiaSymbol->get_name(&SymbolNameBstr) != S_OK)
-			return nullptr;
-	}
-
-	CHAR*  SymbolNameMb;
-	size_t SymbolNameLength;
-
-	SymbolNameLength = (size_t)SysStringLen(SymbolNameBstr) + 1;
-	SymbolNameMb = new CHAR[SymbolNameLength];
-	wcstombs(SymbolNameMb, SymbolNameBstr, SymbolNameLength);
-
-	SysFreeString(SymbolNameBstr);
-
-	return SymbolNameMb;
+    return m_path;
 }
 
-SYMBOL* SymbolModule::GetSymbolByName(IN const CHAR* SymbolName)
+DWORD SymbolModule::GetMachineType() const
 {
-	auto it = m_SymbolNameMap.find(SymbolName);
-	return it == m_SymbolNameMap.end() ? nullptr : it->second;
+    return m_machineType;
 }
 
-SYMBOL* SymbolModule::GetSymbolByTypeId(IN DWORD TypeId)
+CV_CFL_LANG SymbolModule::GetLanguage() const
 {
-	auto it = m_SymbolMap.find(TypeId);
-	return it == m_SymbolMap.end() ? nullptr : it->second;
+    return m_language;
 }
 
-SYMBOL* SymbolModule::GetSymbol(IN IDiaSymbol* DiaSymbol)
+std::string SymbolModule::GetSymbolName(const DiaSymbolPtr& diaSymbol, bool raw)
 {
-	DWORD TypeId;
-	DiaSymbol->get_symIndexId(&TypeId);
+    if (!diaSymbol)
+    {
+        return {};
+    }
 
-	auto it = m_SymbolMap.find(TypeId);
-	if (it != m_SymbolMap.end())
-		return it->second;
+    BSTR symbolNameBstr;
+    if (raw || (diaSymbol->get_undecoratedName(&symbolNameBstr) != S_OK))
+    {
+        if (diaSymbol->get_name(&symbolNameBstr) != S_OK)
+        {
+            return {};
+        }
+    }
 
-	SYMBOL* Symbol;
-	Symbol = new SYMBOL;
-	m_SymbolMap[TypeId] = Symbol;
-	m_SymbolSet.insert(Symbol);
+    CHAR* symbolNameMb = nullptr;
+    size_t symbolNameLength = 0;
 
-	InitSymbol(DiaSymbol, Symbol);
+    symbolNameLength = static_cast<size_t>(SysStringLen(symbolNameBstr) + 1);
+    symbolNameMb = new CHAR[symbolNameLength];
+    wcstombs(symbolNameMb, symbolNameBstr, symbolNameLength);
 
-	if (Symbol->Name)
-		m_SymbolNameMap[Symbol->Name] = Symbol;
+    std::string res = symbolNameMb;
 
-	return Symbol;
+    SysFreeString(symbolNameBstr);
+    delete[] symbolNameMb;
+
+    return res;
 }
 
-VOID SymbolModule::UpdateSymbolMapFromEnumerator(IN IDiaEnumSymbols* DiaSymbolEnumerator)
+SymbolPtr SymbolModule::GetSymbolByName(const std::string& symbolName)
 {
-	IDiaSymbol* Result;
-	ULONG FetchedSymbolCount = 0;
-
-	while (SUCCEEDED(DiaSymbolEnumerator->Next(1, &Result, &FetchedSymbolCount)) && (FetchedSymbolCount == 1))
-	{
-		IDiaSymbol *DiaChildSymbol(Result);
-		IDiaEnumSymbols *DiaSymbolEnumerator1;
-		if (SUCCEEDED(DiaChildSymbol->findChildren(SymTagNull, nullptr, nsNone, &DiaSymbolEnumerator1)))
-		{
-			IDiaSymbol* Result1;
-			ULONG FetchedSymbolCount1 = 0;
-
-			while (SUCCEEDED(DiaSymbolEnumerator1->Next(1, &Result1, &FetchedSymbolCount1)) && (FetchedSymbolCount1 == 1))
-			{
-				IDiaSymbol *DiaChildSymbol1(Result1);
-				DWORD DwordResult;
-				DiaChildSymbol1->get_symTag(&DwordResult);
-				auto Tag = static_cast<enum SymTagEnum>(DwordResult);
-				if (Tag == SymTagFunction)
-				{
-					DWORD TypeId2;
-					DiaChildSymbol1->get_symIndexId(&TypeId2);
-					auto it = m_SymbolMap.find(TypeId2);
-					if (it == m_SymbolMap.end()) continue;
-					IDiaEnumSymbols *DiaSymbolEnumeratorF;
-
-					if (FAILED(DiaChildSymbol1->findChildren(SymTagNull, nullptr, nsNone, &DiaSymbolEnumeratorF)))
-						continue;
-
-					if (it->second->u.Function.ArgumentCount == 0) continue;
-					IDiaSymbol* ResultF;
-					ULONG FetchedSymbolCountF = 0;
-					DWORD IndexF = 0;
-					DWORD Argc = 0;
-					while (SUCCEEDED(DiaSymbolEnumeratorF->Next(1, &ResultF, &FetchedSymbolCountF)) && (FetchedSymbolCountF == 1))
-					{
-						IDiaSymbol *DiaChildSymbolF(ResultF);
-
-						DWORD symTag;
-						DiaChildSymbolF->get_symTag(&symTag);
-						if (symTag == SymTagData)
-						{
-							DWORD DwordResult;
-							DiaChildSymbolF->get_dataKind(&DwordResult);
-							if (DwordResult == DataIsParam)
-							{
-								SYMBOL *tmp = it->second->u.Function.Arguments[Argc];
-								it->second->u.Function.Arguments[Argc] = new SYMBOL;
-								*(it->second->u.Function.Arguments[Argc]) = *tmp;
-
-								it->second->u.Function.Arguments[Argc++]->Name = GetSymbolName(DiaChildSymbolF);
-							}
-						}
-						DiaChildSymbolF->Release();
-						IndexF += 1;
-					}
-					DiaSymbolEnumeratorF->Release();
-				}
-				DiaChildSymbol1->Release();
-			}
-		}
-		DiaSymbolEnumerator1->Release();
-		DiaChildSymbol->Release();
-	}
+    auto it = m_symbolNameMap.find(symbolName);
+    return it == m_symbolNameMap.end() ? nullptr : it->second;
 }
 
-VOID SymbolModule::BuildSymbolMapFromEnumerator(IN IDiaEnumSymbols* DiaSymbolEnumerator)
+SymbolPtr SymbolModule::GetSymbolBySymbolIndex(DWORD symIndex)
 {
-	IDiaSymbol* Result;
-	ULONG FetchedSymbolCount = 0;
-
-	while (SUCCEEDED(DiaSymbolEnumerator->Next(1, &Result, &FetchedSymbolCount)) && (FetchedSymbolCount == 1))
-	{
-		IDiaSymbol *DiaChildSymbol(Result);
-		GetSymbol(DiaChildSymbol);
-		DiaChildSymbol->Release();
-	}
+    auto it = m_symbolMap.find(symIndex);
+    return it == m_symbolMap.end() ? nullptr : it->second;
 }
 
-VOID SymbolModule::BuildFunctionSetFromEnumerator(IN IDiaEnumSymbols* DiaSymbolEnumerator)
+SymbolPtr SymbolModule::GetSymbol(const DiaSymbolPtr& diaSymbol)
 {
-	IDiaSymbol* Result;
-	ULONG FetchedSymbolCount = 0;
+    if (!diaSymbol)
+    {
+        return {};
+    }
 
-	while (SUCCEEDED(DiaSymbolEnumerator->Next(1, &Result, &FetchedSymbolCount)) && (FetchedSymbolCount == 1))
-	{
-		IDiaSymbol *DiaChildSymbol(Result);
+    DWORD typeId = 0;
+    diaSymbol->get_symIndexId(&typeId);
 
-		DWORD DwordResult;
-		DiaChildSymbol->get_symTag(&DwordResult);
-		auto Tag = static_cast<enum SymTagEnum>(DwordResult);
-		if (Tag != SymTagThunk)
-		{
-			//BOOL IsFunction;
-			//DiaChildSymbol->get_function(&IsFunction);
-			//if (IsFunction)
-			{
-				CHAR* FunctionName = GetSymbolName(DiaChildSymbol, false);
+    auto it = m_symbolMap.find(typeId);
+    if (it != m_symbolMap.end())
+    {
+        return it->second;
+    }
 
-				m_FunctionSet.insert(FunctionName);
-				delete[] FunctionName;
-			}
-		}
-		DiaChildSymbol->Release();
-	}
-	}
+    auto symbol = std::make_shared<Symbol>();
+    m_symbolMap[typeId] = symbol;
+    m_symbolSet.insert(symbol);
 
-VOID SymbolModule::BuildSymbolMap()
-{
-	IDiaEnumSymbols *DiaSymbolEnumerator;
+    InitSymbol(diaSymbol, symbol);
 
-	if (SUCCEEDED(m_GlobalSymbol->findChildren(SymTagPublicSymbol, nullptr, nsNone, &DiaSymbolEnumerator)))
-	{
-		BuildFunctionSetFromEnumerator(DiaSymbolEnumerator);
-	}
-	if (SUCCEEDED(m_GlobalSymbol->findChildren(SymTagEnum, nullptr, nsNone, &DiaSymbolEnumerator)))
-	{
-		BuildSymbolMapFromEnumerator(DiaSymbolEnumerator);
-	}
-	if (SUCCEEDED(m_GlobalSymbol->findChildren(SymTagUDT, nullptr, nsNone, &DiaSymbolEnumerator)))
-	{
-		BuildSymbolMapFromEnumerator(DiaSymbolEnumerator);
-	}
-	if (SUCCEEDED(m_GlobalSymbol->findChildren(SymTagCompiland, nullptr, nsNone, &DiaSymbolEnumerator)))
-	{
-		UpdateSymbolMapFromEnumerator(DiaSymbolEnumerator);
-	}
-	DiaSymbolEnumerator->Release();
+    if (!symbol->name.empty())
+    {
+        m_symbolNameMap[symbol->name] = symbol;
+    }
+
+    return symbol;
 }
 
-VOID SymbolModule::InitSymbol(IN IDiaSymbol* DiaSymbol, IN SYMBOL* Symbol)
+namespace
 {
-	DWORD DwordResult;
-	ULONGLONG UlonglongResult;
-	BOOL BoolResult;
+    void ForEachDiaSymbol(
+        const DiaEnumSymbolsPtr& diaSymbolEnumerator,
+        const std::function<void(const DiaSymbolPtr&)>& func)
+    {
+        assert(diaSymbolEnumerator);
 
-	DiaSymbol->get_symTag(&DwordResult);
-	Symbol->Tag = static_cast<enum SymTagEnum>(DwordResult);
+        ULONG fetchedSymbolCount = 0;
+        DiaSymbolPtr diaChildSymbol;
 
-	DiaSymbol->get_baseType(&DwordResult);
-	Symbol->BaseType = static_cast<BasicType>(DwordResult);
+        auto result = diaSymbolEnumerator->Next(1, &diaChildSymbol, &fetchedSymbolCount);
 
-	DiaSymbol->get_typeId(&DwordResult);
-	Symbol->TypeId = DwordResult;
-
-	DiaSymbol->get_length(&UlonglongResult);
-	Symbol->Size = static_cast<DWORD>(UlonglongResult);
-
-	DiaSymbol->get_constType(&BoolResult);
-	Symbol->IsConst = static_cast<BOOL>(BoolResult);
-
-	DiaSymbol->get_volatileType(&BoolResult);
-	Symbol->IsVolatile = static_cast<BOOL>(BoolResult);
-
-	Symbol->Name = GetSymbolName(DiaSymbol);
-
-	switch (Symbol->Tag)
-	{
-	case SymTagUDT:             ProcessSymbolUdt        (DiaSymbol, Symbol); break;
-	case SymTagEnum:            ProcessSymbolEnum       (DiaSymbol, Symbol); break;
-	case SymTagFunctionType:
-	{
-					Symbol->u.Function.IsOverride = FALSE;
-					Symbol->u.Function.IsPure = FALSE;
-					Symbol->u.Function.IsConst = FALSE;
-					Symbol->u.Function.IsVirtual = FALSE;
-					Symbol->u.Function.IsStatic = FALSE;
-				    ProcessSymbolFunction   (DiaSymbol, Symbol); 
-	} break;
-	case SymTagPointerType:     ProcessSymbolPointer    (DiaSymbol, Symbol); break;
-	case SymTagArrayType:       ProcessSymbolArray      (DiaSymbol, Symbol); break;
-	case SymTagBaseType:        ProcessSymbolBase       (DiaSymbol, Symbol); break;
-	case SymTagTypedef:         ProcessSymbolTypedef    (DiaSymbol, Symbol); break;
-	case SymTagFunctionArgType: ProcessSymbolFunctionArg(DiaSymbol, Symbol); break;
-	case SymTagFunction:        ProcessSymbolFunctionEx (DiaSymbol, Symbol); break;
-	default:                                                                 break;
-	}
+        for (; SUCCEEDED(result) && (fetchedSymbolCount == 1);
+             diaChildSymbol.Release(), result = diaSymbolEnumerator->Next(1, &diaChildSymbol, &fetchedSymbolCount))
+        {
+            func(diaChildSymbol);
+        }
+    }
 }
 
-VOID SymbolModule::ProcessSymbolBase(IN IDiaSymbol* DiaSymbol, IN SYMBOL* Symbol)
+void SymbolModule::UpdateSymbolMapFromEnumerator(const DiaEnumSymbolsPtr& diaSymbolEnumerator)
+{
+    ForEachDiaSymbol(diaSymbolEnumerator, [this](const DiaSymbolPtr& symbol)
+    {
+        DiaEnumSymbolsPtr diaSymbolEnumerator1;
+        if (SUCCEEDED(symbol->findChildren(SymTagNull, nullptr, nsNone, &diaSymbolEnumerator1)))
+        {
+            ForEachDiaSymbol(diaSymbolEnumerator1, [this](const DiaSymbolPtr& symbol)
+            {
+                DWORD dwordResult = 0;
+                symbol->get_symTag(&dwordResult);
+
+                auto tag = static_cast<enum SymTagEnum>(dwordResult);
+                if (tag != SymTagFunction)
+                {
+                    return;
+                }
+
+                DWORD symIndex = 0;
+                symbol->get_symIndexId(&symIndex);
+
+                auto it = m_symbolMap.find(symIndex);
+                if (it == m_symbolMap.end())
+                {
+                    return;
+                }
+
+                DiaEnumSymbolsPtr diaSymbolEnumeratorF;
+                if (FAILED(symbol->findChildren(SymTagNull, nullptr, nsNone, &diaSymbolEnumeratorF)))
+                {
+                    return;
+                }
+
+                DWORD argc = 0;
+                ForEachDiaSymbol(diaSymbolEnumeratorF, [this, &argc, &it](const DiaSymbolPtr& symbol)
+                {
+                    DWORD symTag = 0;
+                    symbol->get_symTag(&symTag);
+                    if (symTag != SymTagData)
+                    {
+                        return;
+                    }
+
+                    DWORD dwordResult = 0;
+                    symbol->get_dataKind(&dwordResult);
+                    if (dwordResult == DataIsParam)
+                    {
+                        auto newSymbol = std::make_shared<Symbol>();
+                        newSymbol->name = GetSymbolName(symbol);
+                        std::get<SymbolFunction>(it->second->variant).arguments.push_back(std::move(newSymbol));
+                    }
+                });
+            });
+        }
+    });
+}
+
+void SymbolModule::BuildSymbolMapFromEnumerator(const DiaEnumSymbolsPtr& diaSymbolEnumerator)
+{
+    ForEachDiaSymbol(diaSymbolEnumerator, [this](const DiaSymbolPtr& symbol)
+    {
+        GetSymbol(symbol);
+    });
+}
+
+void SymbolModule::BuildFunctionSetFromEnumerator(const DiaEnumSymbolsPtr& diaSymbolEnumerator)
+{
+    ForEachDiaSymbol(diaSymbolEnumerator, [this](const DiaSymbolPtr& symbol)
+    {
+        DWORD dwordResult = 0;
+        symbol->get_symTag(&dwordResult);
+
+        auto tag = static_cast<enum SymTagEnum>(dwordResult);
+        if (tag != SymTagThunk)
+        {
+            auto functionName = GetSymbolName(symbol, false);
+            m_functionSet.insert(functionName);
+        }
+    });
+}
+
+void SymbolModule::BuildSymbolMap()
+{
+    if (DiaEnumSymbolsPtr diaSymbolEnumerator; SUCCEEDED(m_globalSymbol->findChildren(SymTagPublicSymbol, nullptr, nsNone, &diaSymbolEnumerator)))
+    {
+        BuildFunctionSetFromEnumerator(diaSymbolEnumerator);
+    }
+    if (DiaEnumSymbolsPtr diaSymbolEnumerator; SUCCEEDED(m_globalSymbol->findChildren(SymTagEnum, nullptr, nsNone, &diaSymbolEnumerator)))
+    {
+        BuildSymbolMapFromEnumerator(diaSymbolEnumerator);
+    }
+    if (DiaEnumSymbolsPtr diaSymbolEnumerator; SUCCEEDED(m_globalSymbol->findChildren(SymTagUDT, nullptr, nsNone, &diaSymbolEnumerator)))
+    {
+        BuildSymbolMapFromEnumerator(diaSymbolEnumerator);
+    }
+    if (DiaEnumSymbolsPtr diaSymbolEnumerator; SUCCEEDED(m_globalSymbol->findChildren(SymTagCompiland, nullptr, nsNone, &diaSymbolEnumerator)))
+    {
+        UpdateSymbolMapFromEnumerator(diaSymbolEnumerator);
+    }
+}
+
+const SymbolMap& SymbolModule::GetSymbolMap() const
+{
+    return m_symbolMap;
+}
+
+const SymbolNameMap& SymbolModule::GetSymbolNameMap() const
+{
+    return m_symbolNameMap;
+}
+
+const FunctionSet& SymbolModule::GetFunctionSet() const
+{
+    return m_functionSet;
+}
+
+void SymbolModule::InitSymbol(const DiaSymbolPtr& diaSymbol, const SymbolPtr& symbol)
+{
+    assert(symbol);
+    assert(diaSymbol);
+
+    DWORD dwordResult = 0;
+    ULONGLONG uLongLongResult = 0;
+    BOOL boolResult = FALSE;
+
+    diaSymbol->get_symIndexId(&dwordResult);
+    symbol->symIndexId = dwordResult;
+
+    diaSymbol->get_symTag(&dwordResult);
+    symbol->tag = static_cast<enum SymTagEnum>(dwordResult);
+
+    diaSymbol->get_baseType(&dwordResult);
+    symbol->baseType = static_cast<BasicType>(dwordResult);
+
+    diaSymbol->get_typeId(&dwordResult);
+    symbol->typeId = dwordResult;
+
+    diaSymbol->get_length(&uLongLongResult);
+    symbol->size = static_cast<DWORD>(uLongLongResult);
+
+    diaSymbol->get_constType(&boolResult);
+    symbol->isConst = static_cast<bool>(boolResult);
+
+    diaSymbol->get_volatileType(&boolResult);
+    symbol->isVolatile = static_cast<bool>(boolResult);
+
+    symbol->name = GetSymbolName(diaSymbol);
+
+    switch (symbol->tag)
+    {
+    case SymTagUDT:
+        ProcessSymbolUdt(diaSymbol, symbol);
+        break;
+
+    case SymTagEnum:
+        ProcessSymbolEnum(diaSymbol, symbol);
+        break;
+
+    case SymTagFunctionType:
+        ProcessSymbolFunction(diaSymbol, symbol);
+        break;
+
+    case SymTagPointerType:
+        ProcessSymbolPointer(diaSymbol, symbol);
+        break;
+
+    case SymTagArrayType:
+        ProcessSymbolArray(diaSymbol, symbol);
+        break;
+
+    case SymTagBaseType:
+        ProcessSymbolBase(diaSymbol, symbol);
+        break;
+
+    case SymTagTypedef:
+        ProcessSymbolTypedef(diaSymbol, symbol);
+        break;
+
+    case SymTagFunctionArgType:
+        ProcessSymbolFunctionArg(diaSymbol, symbol);
+        break;
+
+    case SymTagFunction:
+        ProcessSymbolFunctionEx(diaSymbol, symbol);
+        break;
+
+    default:
+        break;
+    }
+}
+
+void SymbolModule::ProcessSymbolBase(const DiaSymbolPtr& diaSymbol, const SymbolPtr& symbol)
 {
 }
 
-VOID SymbolModule::ProcessSymbolEnum(IN IDiaSymbol* DiaSymbol, IN SYMBOL* Symbol)
+void SymbolModule::ProcessSymbolEnum(const DiaSymbolPtr& diaSymbol, const SymbolPtr& symbol)
 {
-	IDiaEnumSymbols *DiaSymbolEnumerator;
+    assert(diaSymbol);
+    assert(symbol);
 
-	if (FAILED(DiaSymbol->findChildren(SymTagNull, nullptr, nsNone, &DiaSymbolEnumerator)))
-		return;
+    symbol->variant = SymbolEnum{};
+    auto& symbolEnum = std::get<SymbolEnum>(symbol->variant);
 
-	LONG ChildCount;
-	DiaSymbolEnumerator->get_Count(&ChildCount);
+    DiaEnumSymbolsPtr diaSymbolEnumerator;
+    if (FAILED(diaSymbol->findChildren(SymTagNull, nullptr, nsNone, &diaSymbolEnumerator)))
+    {
+        return;
+    }
 
-	Symbol->u.Enum.FieldCount = 0; //static_cast<DWORD>(ChildCount);
-	Symbol->u.Enum.Fields = new SYMBOL_ENUM_FIELD[ChildCount];
+    ForEachDiaSymbol(diaSymbolEnumerator, [this, &symbolEnum, &symbol](const DiaSymbolPtr& diaSymbol)
+    {
+        symbolEnum.fields.push_back({});
+        auto& enumValue = symbolEnum.fields.back();
 
-	IDiaSymbol* Result;
-	ULONG FetchedSymbolCount = 0;
-	DWORD Index = 0;
+        enumValue.parent = symbol;
+        enumValue.name = GetSymbolName(diaSymbol);
 
-	while (SUCCEEDED(DiaSymbolEnumerator->Next(1, &Result, &FetchedSymbolCount)) && (FetchedSymbolCount == 1))
-	{
-		IDiaSymbol *DiaChildSymbol(Result);
-
-		SYMBOL_ENUM_FIELD* EnumValue = &Symbol->u.Enum.Fields[Index];
-
-		EnumValue->Parent = Symbol;
-		EnumValue->Name = GetSymbolName(DiaChildSymbol);
-
-		VariantInit(&EnumValue->Value);
-		DiaChildSymbol->get_value(&EnumValue->Value);
-
-		DiaChildSymbol->Release();
-		Index += 1;
-		Symbol->u.Enum.FieldCount += 1;
-	}
+        VariantInit(&enumValue.value);
+        diaSymbol->get_value(&enumValue.value);
+    });
 }
 
-VOID SymbolModule::ProcessSymbolTypedef(IN IDiaSymbol* DiaSymbol, IN SYMBOL* Symbol)
+void SymbolModule::ProcessSymbolTypedef(const DiaSymbolPtr& diaSymbol, const SymbolPtr& symbol)
 {
-	IDiaSymbol *DiaTypedefSymbol;
+    assert(diaSymbol);
+    assert(symbol);
 
-	DiaSymbol->get_type(&DiaTypedefSymbol);
+    DiaSymbolPtr diaTypedefSymbol;
+    diaSymbol->get_type(&diaTypedefSymbol);
 
-	Symbol->u.Typedef.Type = GetSymbol(DiaTypedefSymbol);
-
-	DiaTypedefSymbol->Release();
+    SymbolTypedef typedefSymbol;
+    typedefSymbol.type = GetSymbol(diaTypedefSymbol);
+    symbol->variant = std::move(typedefSymbol);
 }
 
-VOID SymbolModule::ProcessSymbolPointer(IN IDiaSymbol* DiaSymbol, IN SYMBOL* Symbol)
+void SymbolModule::ProcessSymbolPointer(const DiaSymbolPtr& diaSymbol, const SymbolPtr& symbol)
 {
-	IDiaSymbol *DiaPointerSymbol;
+    assert(diaSymbol);
+    assert(symbol);
 
-	DiaSymbol->get_type(&DiaPointerSymbol);
-	DiaSymbol->get_reference(&Symbol->u.Pointer.IsReference);
+    DiaSymbolPtr diaPointerSymbol;
+    diaSymbol->get_type(&diaPointerSymbol);
 
-	Symbol->u.Pointer.Type = GetSymbol(DiaPointerSymbol);
+    SymbolPointer pointer;
+    BOOL isReference = FALSE;
+    diaSymbol->get_reference(&isReference);
+    pointer.isReference = static_cast<bool>(isReference);
 
-	DiaPointerSymbol->Release();
+    pointer.type = GetSymbol(diaPointerSymbol);
 
-	if (m_MachineType == 0)
-	{
-		switch (Symbol->Size)
-		{
-			case 4:  m_MachineType = IMAGE_FILE_MACHINE_I386;  break;
-			case 8:  m_MachineType = IMAGE_FILE_MACHINE_AMD64; break;
-			default: m_MachineType = 0; break;
-		}
-	}
+    if (m_machineType == 0)
+    {
+        switch (symbol->size)
+        {
+        case 4:  m_machineType = IMAGE_FILE_MACHINE_I386;  break;
+        case 8:  m_machineType = IMAGE_FILE_MACHINE_AMD64; break;
+        default: m_machineType = 0; break;
+        }
+    }
+
+    symbol->variant = std::move(pointer);
 }
 
-VOID SymbolModule::ProcessSymbolArray(IN IDiaSymbol* DiaSymbol, IN SYMBOL* Symbol)
+void SymbolModule::ProcessSymbolArray(const DiaSymbolPtr& diaSymbol, const SymbolPtr& symbol)
 {
-	IDiaSymbol *DiaDataTypeSymbol;
+    assert(diaSymbol);
+    assert(symbol);
 
-	DiaSymbol->get_type(&DiaDataTypeSymbol);
-	Symbol->u.Array.ElementType = GetSymbol(DiaDataTypeSymbol);
+    DiaSymbolPtr diaDataTypeSymbol;
+    diaSymbol->get_type(&diaDataTypeSymbol);
 
-	DiaSymbol->get_count(&Symbol->u.Array.ElementCount);
+    SymbolArray arraySymbol;
+    arraySymbol.elementType = GetSymbol(diaDataTypeSymbol);
 
-	DiaDataTypeSymbol->Release();
+    diaSymbol->get_count(&arraySymbol.elementCount);
+
+    symbol->variant = std::move(arraySymbol);
 }
 
-VOID SymbolModule::ProcessSymbolFunction(IN IDiaSymbol* DiaSymbol, IN SYMBOL* Symbol)
+void SymbolModule::ProcessSymbolFunction(const DiaSymbolPtr& diaSymbol, const SymbolPtr& symbol)
 {
-	DWORD CallingConvention;
-	DiaSymbol->get_callingConvention(&CallingConvention);
+    assert(diaSymbol);
+    assert(symbol);
 
-	Symbol->u.Function.CallingConvention = static_cast<CV_call_e>(CallingConvention);
+    if (std::holds_alternative<std::monostate>(symbol->variant))
+    {
+        symbol->variant = SymbolFunction{};
+    }
+    auto& function = std::get<SymbolFunction>(symbol->variant);
 
-	IDiaSymbol *DiaReturnTypeSymbol;
-	DiaSymbol->get_type(&DiaReturnTypeSymbol);
-	Symbol->u.Function.ReturnType = GetSymbol(DiaReturnTypeSymbol);
-	DiaReturnTypeSymbol->Release();
+    DWORD callingConvention = 0;
+    diaSymbol->get_callingConvention(&callingConvention);
 
-	IDiaEnumSymbols *DiaSymbolEnumerator;
+    function.callingConvention = static_cast<CV_call_e>(callingConvention);
 
-	if (FAILED(DiaSymbol->findChildren(SymTagNull, nullptr, nsNone, &DiaSymbolEnumerator)))
-		return;
+    DiaSymbolPtr diaReturnTypeSymbol;
+    diaSymbol->get_type(&diaReturnTypeSymbol);
+    function.returnType = GetSymbol(diaReturnTypeSymbol);
 
-	LONG ChildCount;
+    DiaEnumSymbolsPtr diaSymbolEnumerator;
 
-	DiaSymbolEnumerator->get_Count(&ChildCount);
+    if (FAILED(diaSymbol->findChildren(SymTagNull, nullptr, nsNone, &diaSymbolEnumerator)))
+    {
+        return;
+    }
 
-	Symbol->u.Function.ArgumentCount = static_cast<DWORD>(ChildCount);
-	Symbol->u.Function.Arguments = new SYMBOL*[ChildCount];
-
-	IDiaSymbol* Result;
-	ULONG FetchedSymbolCount = 0;
-	DWORD Index = 0;
-
-	while (SUCCEEDED(DiaSymbolEnumerator->Next(1, &Result, &FetchedSymbolCount)) && (FetchedSymbolCount == 1))
-	{
-		IDiaSymbol *DiaChildSymbol(Result);
-
-		SYMBOL* Argument;
-		Argument = GetSymbol(DiaChildSymbol);
-		Symbol->u.Function.Arguments[Index] = Argument;
-		DiaChildSymbol->Release();
-		Index += 1;
-	}
-	DiaSymbolEnumerator->Release();
+    ForEachDiaSymbol(diaSymbolEnumerator, [this, &function](const DiaSymbolPtr& diaSymbol)
+    {
+        function.arguments.push_back(GetSymbol(diaSymbol));
+    });
 }
 
-VOID SymbolModule::ProcessSymbolFunctionArg(IN IDiaSymbol* DiaSymbol, IN SYMBOL* Symbol)
+void SymbolModule::ProcessSymbolFunctionArg(const DiaSymbolPtr& diaSymbol, const SymbolPtr& symbol)
 {
-	IDiaSymbol *DiaArgumentTypeSymbol;
+    assert(diaSymbol);
+    assert(symbol);
 
-	DiaSymbol->get_type(&DiaArgumentTypeSymbol);
-	Symbol->u.FunctionArg.Type = GetSymbol(DiaArgumentTypeSymbol);
-	DiaArgumentTypeSymbol->Release();
+    DiaSymbolPtr diaArgumentTypeSymbol;
+
+    diaSymbol->get_type(&diaArgumentTypeSymbol);
+
+    SymbolFunctionArg funcArg;
+    funcArg.type = GetSymbol(diaArgumentTypeSymbol);
+
+    symbol->variant = std::move(funcArg);
 }
 
-VOID SymbolModule::ProcessSymbolUdt(IN IDiaSymbol* DiaSymbol, IN SYMBOL* Symbol)
+void SymbolModule::ProcessSymbolUdt(const DiaSymbolPtr& diaSymbol, const SymbolPtr& symbol)
 {
-	DWORD Kind;
-	DiaSymbol->get_udtKind(&Kind);
-	Symbol->u.Udt.Kind = static_cast<UdtKind>(Kind);
-	Symbol->u.Udt.BaseClassCount = 0;
-	Symbol->u.Udt.BaseClassFields = 0;
+    assert(diaSymbol);
+    assert(symbol);
 
-	IDiaEnumSymbols *DiaSymbolEnumerator;
+    symbol->variant = SymbolUdt{};
+    auto& udt = std::get<SymbolUdt>(symbol->variant);
 
-	if (FAILED(DiaSymbol->findChildren(SymTagNull, nullptr, nsNone, &DiaSymbolEnumerator)))
-		return;
+    DWORD kind = 0;
+    diaSymbol->get_udtKind(&kind);
+    udt.kind = static_cast<UdtKind>(kind);
 
-	LONG ChildCount;
+    DiaEnumSymbolsPtr diaSymbolEnumerator;
 
-	DiaSymbolEnumerator->get_Count(&ChildCount);
+    if (FAILED(diaSymbol->findChildren(SymTagNull, nullptr, nsNone, &diaSymbolEnumerator)))
+    {
+        return;
+    }
 
-	Symbol->u.Udt.FieldCount = 0; //static_cast<DWORD>(ChildCount);
-	Symbol->u.Udt.Fields = new SYMBOL_UDT_FIELD[ChildCount + 1];
+    ForEachDiaSymbol(diaSymbolEnumerator, [this, &udt, &symbol](const DiaSymbolPtr& diaChildSymbol)
+    {
+        DWORD symTag = 0;
+        diaChildSymbol->get_symTag(&symTag);
 
-	IDiaSymbol* Result;
-	ULONG FetchedSymbolCount = 0;
-	DWORD Index = 0;
+        SymbolUdtField member;
 
-	while (SUCCEEDED(DiaSymbolEnumerator->Next(1, &Result, &FetchedSymbolCount)) && (FetchedSymbolCount == 1))
-	{
-		IDiaSymbol *DiaChildSymbol(Result);
+        member.name = GetSymbolName(diaChildSymbol);
+        member.parent = symbol;
+        member.isBaseClass = false;
 
-		DWORD symTag;
-		DiaChildSymbol->get_symTag(&symTag);
 
-		SYMBOL_UDT_FIELD* Member = &Symbol->u.Udt.Fields[Index];
+        member.tag = static_cast<enum SymTagEnum>(symTag);
+        member.dataKind = static_cast<enum DataKind>(0); //???
 
-		Member->Name = GetSymbolName(DiaChildSymbol);
-		Member->Parent = Symbol;
-		Member->IsBaseClass = FALSE;
+        LONG offset = 0;
+        diaChildSymbol->get_offset(&offset);
+        member.offset = static_cast<DWORD>(offset);
 
-		Member->Tag = static_cast<enum SymTagEnum>(symTag);
-		Member->DataKind = static_cast<enum DataKind>(0); //???
+        ULONGLONG bits = 0;
+        if (symTag == SymTagData)
+        {
+            diaChildSymbol->get_length(&bits);
+        }
 
-		LONG Offset = 0;
-		DiaChildSymbol->get_offset(&Offset);
-		Member->Offset = static_cast<DWORD>(Offset);
+        DWORD dwAccess = 0;
+        diaChildSymbol->get_access(&dwAccess);
+        member.access = dwAccess;
 
-		ULONGLONG Bits = 0;
-		if (symTag == SymTagData)
-		{
-			DiaChildSymbol->get_length(&Bits);
-		}
+        member.bits = static_cast<DWORD>(bits);
 
-		DWORD dwAccess = 0;
-		DiaChildSymbol->get_access(&dwAccess);
-		Member->Access = dwAccess;
+        diaChildSymbol->get_bitPosition(&member.bitPosition);
 
-		Member->Bits = static_cast<DWORD>(Bits);
+        if (symTag == SymTagData || symTag == SymTagBaseClass)
+        {
+            DWORD dwordResult = 0;
+            diaChildSymbol->get_dataKind(&dwordResult);
+            member.dataKind = static_cast<enum DataKind>(dwordResult);
 
-		DiaChildSymbol->get_bitPosition(&Member->BitPosition);
+            DiaSymbolPtr memberTypeDiaSymbol;
+            diaChildSymbol->get_type(&memberTypeDiaSymbol);
+            member.type = GetSymbol(memberTypeDiaSymbol);
+            if (symTag == SymTagBaseClass)
+            {
+                udt.baseClassFields.push_back({});
+                auto& baseClass = udt.baseClassFields.back();
 
-		if (symTag == SymTagData || symTag == SymTagBaseClass)
-		{
-			DWORD DwordResult;
-			DiaChildSymbol->get_dataKind(&DwordResult);
-			Member->DataKind = static_cast<enum DataKind>(DwordResult);
+                baseClass.type = member.type;
 
-			IDiaSymbol *MemberTypeDiaSymbol;
-			DiaChildSymbol->get_type(&MemberTypeDiaSymbol);
-			Member->Type = GetSymbol(MemberTypeDiaSymbol);
-			MemberTypeDiaSymbol->Release();
-			if (symTag == SymTagBaseClass)
-			{
-				++Symbol->u.Udt.BaseClassCount;
-				if (Symbol->u.Udt.BaseClassFields == 0)
-					Symbol->u.Udt.BaseClassFields = (SYMBOL_UDT_BASECLASS *)malloc(sizeof(SYMBOL_UDT_BASECLASS));
-				else	Symbol->u.Udt.BaseClassFields = (SYMBOL_UDT_BASECLASS *)realloc(Symbol->u.Udt.BaseClassFields, sizeof(SYMBOL_UDT_BASECLASS)*Symbol->u.Udt.BaseClassCount);
-				Symbol->u.Udt.BaseClassFields[Symbol->u.Udt.BaseClassCount-1].Type = Member->Type;
-				DWORD Access = 0;
-				DiaChildSymbol->get_access(&Access);
-				Symbol->u.Udt.BaseClassFields[Symbol->u.Udt.BaseClassCount-1].Access = Access;
-				BOOL IsVirtual = FALSE;
-				DiaChildSymbol->get_virtualBaseClass(&IsVirtual);
-				Symbol->u.Udt.BaseClassFields[Symbol->u.Udt.BaseClassCount-1].IsVirtual = IsVirtual;
-				Member->IsBaseClass = TRUE;
-			}
-		} else
-		{
-			Member->Type = GetSymbol(DiaChildSymbol);
+                DWORD access = 0;
+                diaChildSymbol->get_access(&access);
+                baseClass.access = access;
 
-			if (symTag == SymTagFunction)
-			{
-				const char *s = strstr(Member->Name, Symbol->Name);
-				if ((s != nullptr && s[-1] == '~') ||
-					strcmp(Member->Name, Symbol->Name)==0)
-				{
-					Member->Type->u.Function.ReturnType = 0;
-				}
-			}
+                BOOL isVirtual = FALSE;
+                diaChildSymbol->get_virtualBaseClass(&isVirtual);
+                baseClass.isVirtual = static_cast<bool>(isVirtual);
+                member.isBaseClass = true;
+            }
+        }
+        else
+        {
+            member.type = GetSymbol(diaChildSymbol);
 
-			if (symTag == SymTagFunction)
-			{
-				if (Member->Type->u.Function.IsOverride && Symbol->u.Udt.BaseClassCount)
-				{
-					for (DWORD i = 0; i < Symbol->u.Udt.BaseClassCount; ++i)
-					{
-						SYMBOL *TmpSymbol = Symbol->u.Udt.BaseClassFields[i].Type;
-						for (DWORD j = 0; j < TmpSymbol->u.Udt.FieldCount; ++j)
-						{
-							if (TmpSymbol->u.Udt.Fields[j].Type->Tag == SymTagFunction &&
-							    strcmp(TmpSymbol->u.Udt.Fields[j].Name, Member->Name) == 0 &&
-							    TmpSymbol->u.Udt.Fields[j].Type->u.Function.ArgumentCount == Member->Type->u.Function.ArgumentCount)
-							{
-								Member->Type->u.Function.VirtualOffset = TmpSymbol->u.Udt.Fields[j].Type->u.Function.VirtualOffset;
-							}
-						}
-					}
-				}
-			} else
-			if (symTag == SymTagUDT)
-			{
-				Member->Type->u.Function.IsOverride = TRUE;
-			}
-		}
-		DiaChildSymbol->Release();
-		Index += 1;
-		Symbol->u.Udt.FieldCount += 1;
-	}
+            if (symTag == SymTagFunction && std::holds_alternative<SymbolFunction>(member.type->variant))
+            {
+                auto& memberTypeFunction = std::get<SymbolFunction>(member.type->variant);
 
-	DiaSymbolEnumerator->Release();
+                const char* s = strstr(member.name.c_str(), symbol->name.c_str());
+                if ((s != nullptr && s[-1] == '~') ||
+                    strcmp(member.name.c_str(), symbol->name.c_str()) == 0)
+                {
+                    memberTypeFunction.returnType = nullptr;
+                }
+
+                if (memberTypeFunction.isOverride && !udt.baseClassFields.empty())
+                {
+                    for (const auto& baseClass : udt.baseClassFields)
+                    {
+                        auto& tmpSymbolUdt = std::get<SymbolUdt>(baseClass.type->variant);
+                        for (auto& field : tmpSymbolUdt.fields)
+                        {
+                            if (field.type->tag == SymTagFunction &&
+                                strcmp(field.name.c_str(), member.name.c_str()) == 0 &&
+                                std::get<SymbolFunction>(field.type->variant).arguments.size() == memberTypeFunction.arguments.size())
+                            {
+                                memberTypeFunction.virtualOffset = std::get<SymbolFunction>(field.type->variant).virtualOffset;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        udt.fields.push_back(std::move(member));
+    });
 }
 
-VOID SymbolModule::ProcessSymbolFunctionEx(IN IDiaSymbol* DiaSymbol, IN SYMBOL* Symbol)
+void SymbolModule::ProcessSymbolFunctionEx(const DiaSymbolPtr& diaSymbol, const SymbolPtr& symbol)
 {
-	DWORD dwAccess = 0;
-	DiaSymbol->get_access(&dwAccess);
-	Symbol->u.Function.Access = dwAccess;
+    assert(diaSymbol);
+    assert(symbol);
 
-	BOOL IsStatic = FALSE;
-	DiaSymbol->get_isStatic(&IsStatic);
-	Symbol->u.Function.IsStatic = IsStatic;
+    symbol->variant = SymbolFunction{};
+    auto& function = std::get<SymbolFunction>(symbol->variant);
 
-	BOOL IsVirtual = FALSE;
-	DiaSymbol->get_virtual(&IsVirtual);
-	Symbol->u.Function.IsVirtual = IsVirtual;
-	Symbol->u.Function.IsOverride = FALSE;
+    DWORD dwAccess = 0;
+    diaSymbol->get_access(&dwAccess);
+    function.access = dwAccess;
 
-	BOOL IsIntro = FALSE;
-	if (!DiaSymbol->get_intro(&IsIntro) && !IsIntro && IsVirtual)
-	{
-		Symbol->u.Function.IsOverride = TRUE;
-	}
+    BOOL isStatic = FALSE;
+    diaSymbol->get_isStatic(&isStatic);
+    function.isStatic = static_cast<bool>(isStatic);
 
-	Symbol->u.Function.VirtualOffset = -1;
-	if (IsVirtual == TRUE)
-	{
-		DWORD VirtualOffset = 0;
-		DiaSymbol->get_virtualBaseOffset(&VirtualOffset);
-		Symbol->u.Function.VirtualOffset = VirtualOffset;
-	}
+    BOOL isVirtual = FALSE;
+    diaSymbol->get_virtual(&isVirtual);
+    function.isVirtual = static_cast<bool>(isVirtual);
+    function.isOverride = false;
 
-	BOOL IsConst = FALSE;
-	DiaSymbol->get_constType(&IsConst);
-	Symbol->u.Function.IsConst = IsConst;
+    BOOL isIntro = FALSE;
+    if (SUCCEEDED(diaSymbol->get_intro(&isIntro)) && !isIntro && isVirtual)
+    {
+        function.isOverride = true;
+    }
 
-	BOOL IsPure = FALSE;
-	if (IsVirtual == TRUE)
-	{
-		DiaSymbol->get_pure(&IsPure);
-	}
-	Symbol->u.Function.IsPure = IsPure;
+    function.virtualOffset = -1;
+    if (function.isVirtual)
+    {
+        DWORD virtualOffset = 0;
+        diaSymbol->get_virtualBaseOffset(&virtualOffset);
+        function.virtualOffset = virtualOffset;
+    }
 
-	IDiaSymbol *DiaArgumentTypeSymbol;
-	DiaSymbol->get_type(&DiaArgumentTypeSymbol);
-	ProcessSymbolFunction(DiaArgumentTypeSymbol, Symbol);
-	DiaArgumentTypeSymbol->Release();
-}
+    BOOL isConst = FALSE;
+    diaSymbol->get_constType(&isConst);
+    function.isConst = static_cast<bool>(isConst);
 
-void SymbolModule::DestroySymbol(IN SYMBOL* Symbol)
-{
-	delete []Symbol->Name;
+    BOOL isPure = FALSE;
+    if (isVirtual == TRUE)
+    {
+        diaSymbol->get_pure(&isPure);
+    }
+    function.isPure = static_cast<bool>(isPure);
 
-	switch (Symbol->Tag)
-	{
-	case SymTagUDT:
-		for (DWORD i = 0; i < Symbol->u.Udt.FieldCount; ++i)
-			delete []Symbol->u.Udt.Fields[i].Name;
+    DiaSymbolPtr diaArgumentTypeSymbol;
+    diaSymbol->get_type(&diaArgumentTypeSymbol);
 
-		delete []Symbol->u.Udt.Fields;
-		if (Symbol->u.Udt.BaseClassCount)
-			free(Symbol->u.Udt.BaseClassFields);
-		break;
+    const auto name = GetSymbolName(diaSymbol, false);
+    if (name.ends_with("const "))
+    {
+        function.isConst = true;
+    }
 
-	case SymTagEnum:
-		for (DWORD i = 0; i < Symbol->u.Enum.FieldCount; ++i)
-			delete []Symbol->u.Enum.Fields[i].Name;
+    ProcessSymbolFunction(diaArgumentTypeSymbol, symbol);
 
-		delete []Symbol->u.Enum.Fields;
-		break;
+    DiaEnumSymbolsPtr diaSymbolEnumerator;
+    if (FAILED(diaSymbol->findChildren(SymTagData, nullptr, nsNone, &diaSymbolEnumerator)))
+    {
+        return;
+    }
 
-	case SymTagFunctionType:
-		delete []Symbol->u.Function.Arguments;
-		break;
-	}
+    size_t argIdx = 0;
+    ForEachDiaSymbol(diaSymbolEnumerator, [this, &function, &argIdx](const DiaSymbolPtr& diaSymbol)
+    {
+        DWORD dataKind = 0;
+        diaSymbol->get_dataKind(&dataKind);
+        if (dataKind == DataIsParam)
+        {
+            function.arguments[argIdx++]->name = GetSymbolName(diaSymbol);
+        }
+    });
 }
 
 //////////////////////////////////////////////////////////////////////////
 // PDB - implementation
 //
-
-struct BasicTypeMapElement
+namespace
 {
-	BasicType   BaseType;
-	DWORD       Length;
-	const CHAR* BasicTypeString;
-	const CHAR* TypeString;
-};
+    struct BasicTypeMapElement
+    {
+        BasicType baseType = btNoType;
+        DWORD length = 0;
+        const char* basicTypeString = nullptr;
+        const char* typeString = nullptr;
+    };
 
-BasicTypeMapElement BasicTypeMapMSVC[] = {
-	{ btNoType,       0,  "btNoType",         "..."              }, //nullptr
-	{ btVoid,         0,  "btVoid",           "void"             },
-	{ btChar,         1,  "btChar",           "char"             },
-	{ btChar16,       2,  "btChar16",         "char16_t"         },
-	{ btChar32,       4,  "btChar32",         "char32_t"         },
-	{ btWChar,        2,  "btWChar",          "wchar_t"          },
-	{ btInt,          1,  "btInt",            "char"             },
-	{ btInt,          2,  "btInt",            "short"            },
-	{ btInt,          4,  "btInt",            "int"              },
-	{ btInt,          8,  "btInt",            "__int64"          },
-	{ btUInt,        16,  "btInt",            "__m128"           },
-	{ btUInt,         1,  "btUInt",           "unsigned char"    },
-	{ btUInt,         2,  "btUInt",           "unsigned short"   },
-	{ btUInt,         4,  "btUInt",           "unsigned int"     },
-	{ btUInt,         8,  "btUInt",           "unsigned __int64" },
-	{ btUInt,        16,  "btUInt",           "__m128"           },
-	{ btFloat,        4,  "btFloat",          "float"            },
-	{ btFloat,        8,  "btFloat",          "double"           },
-	{ btFloat,       10,  "btFloat",          "long double"      }, // 80-bit float
-	{ btBCD,          0,  "btBCD",            "BCD"              },
-	{ btBool,         0,  "btBool",           "BOOL"             },
-	{ btLong,         4,  "btLong",           "long"             },
-	{ btULong,        4,  "btULong",          "unsigned long"    },
-	{ btCurrency,     0,  "btCurrency",       "<NoType>"         }, //nullptr
-	{ btDate,         0,  "btDate",           "DATE"             },
-	{ btVariant,      0,  "btVariant",        "VARIANT"          },
-	{ btComplex,      0,  "btComplex",        "<NoType>"         }, //nullptr
-	{ btBit,          0,  "btBit",            "<NoType>"         }, //nullptr
-	{ btBSTR,         0,  "btBSTR",           "BSTR"             },
-	{ btHresult,      4,  "btHresult",        "HRESULT"          },
-	{ (BasicType)0,   0,  nullptr,            "<NoType>"         }, //nullptr
-};
+    BasicTypeMapElement BasicTypeMapMSVC[] = {
+        { btNoType,       0,  "btNoType",         "..."              }, //nullptr
+        { btVoid,         0,  "btVoid",           "void"             },
+        { btChar,         1,  "btChar",           "char"             },
+        { btChar16,       2,  "btChar16",         "char16_t"         },
+        { btChar32,       4,  "btChar32",         "char32_t"         },
+        { btWChar,        2,  "btWChar",          "wchar_t"          },
+        { btInt,          1,  "btInt",            "char"             },
+        { btInt,          2,  "btInt",            "short"            },
+        { btInt,          4,  "btInt",            "int"              },
+        { btInt,          8,  "btInt",            "int64_t"          },
+        { btUInt,        16,  "btInt",            "__m128"           },
+        { btUInt,         1,  "btUInt",           "unsigned char"    },
+        { btUInt,         2,  "btUInt",           "unsigned short"   },
+        { btUInt,         4,  "btUInt",           "unsigned int"     },
+        { btUInt,         8,  "btUInt",           "unsigned __int64" },
+        { btUInt,        16,  "btUInt",           "__m128"           },
+        { btFloat,        4,  "btFloat",          "float"            },
+        { btFloat,        8,  "btFloat",          "double"           },
+        { btFloat,       10,  "btFloat",          "long double"      }, // 80-bit float
+        { btBCD,          0,  "btBCD",            "BCD"              },
+        { btBool,         0,  "btBool",           "bool"             },
+        { btLong,         4,  "btLong",           "long"             },
+        { btULong,        4,  "btULong",          "unsigned long"    },
+        { btCurrency,     0,  "btCurrency",       "<NoType>"         }, //nullptr
+        { btDate,         0,  "btDate",           "DATE"             },
+        { btVariant,      0,  "btVariant",        "VARIANT"          },
+        { btComplex,      0,  "btComplex",        "<NoType>"         }, //nullptr
+        { btBit,          0,  "btBit",            "<NoType>"         }, //nullptr
+        { btBSTR,         0,  "btBSTR",           "BSTR"             },
+        { btHresult,      4,  "btHresult",        "HRESULT"          },
+        { (BasicType)0,   0,  nullptr,            "<NoType>"         }, //nullptr
+    };
+}
 
 PDB::PDB()
 {
-	m_Impl = new SymbolModule();
+    m_impl = std::make_unique<SymbolModule>();
 }
 
-PDB::PDB(IN const CHAR* Path)
+PDB::PDB(const std::filesystem::path& path)
 {
-	m_Impl = new SymbolModule();
-	m_Impl->Open(Path);
+    m_impl = std::make_unique<SymbolModule>();
+    m_impl->Open(path);
 }
 
-PDB::~PDB()
+
+bool PDB::Open(const std::filesystem::path& path)
 {
-	delete m_Impl;
+    assert(m_impl != nullptr);
+    return m_impl->Open(path);
 }
 
-BOOL PDB::Open(IN const CHAR* Path)
+bool PDB::IsOpened() const
 {
-	return m_Impl->Open(Path);
+    assert(m_impl != nullptr);
+    return m_impl->IsOpen();
 }
 
-BOOL PDB::IsOpened() const
+const std::filesystem::path PDB::GetPath() const
 {
-	return m_Impl->IsOpen();
+    return m_impl->GetPath();
 }
 
-const CHAR* PDB::GetPath() const
+void PDB::Close()
 {
-	return m_Impl->GetPath();
-}
-
-VOID PDB::Close()
-{
-	m_Impl->Close();
+    m_impl->Close();
 }
 
 DWORD PDB::GetMachineType() const
 {
-	return m_Impl->GetMachineType();
+    return m_impl->GetMachineType();
 }
 
 CV_CFL_LANG PDB::GetLanguage() const
 {
-	return m_Impl->GetLanguage();
+    return m_impl->GetLanguage();
 }
 
-const SYMBOL* PDB::GetSymbolByName(IN const CHAR* SymbolName)
+const SymbolPtr PDB::GetSymbolByName(const std::string& symbolName)
 {
-	return m_Impl->GetSymbolByName(SymbolName);
+    return m_impl->GetSymbolByName(symbolName);
 }
 
-const SYMBOL* PDB::GetSymbolByTypeId(IN DWORD TypeId)
+const SymbolPtr PDB::GetSymbolBySymbolIndex(DWORD typeId)
 {
-	return m_Impl->GetSymbolByTypeId(TypeId);
+    return m_impl->GetSymbolBySymbolIndex(typeId);
 }
 
 const SymbolMap& PDB::GetSymbolMap() const
 {
-	return m_Impl->GetSymbolMap();
+    return m_impl->GetSymbolMap();
 }
 
 const SymbolNameMap& PDB::GetSymbolNameMap() const
 {
-	return m_Impl->GetSymbolNameMap();
+    return m_impl->GetSymbolNameMap();
 }
 
 const FunctionSet& PDB::GetFunctionSet() const
 {
-	return m_Impl->GetFunctionSet();
+    return m_impl->GetFunctionSet();
 }
 
-const CHAR* PDB::GetBasicTypeString(IN BasicType BaseType, IN DWORD Size)
+const std::string PDB::GetBasicTypeString(BasicType BaseType, DWORD size)
 {
-	BasicTypeMapElement* TypeMap = BasicTypeMapMSVC;
+    for (int n = 0; BasicTypeMapMSVC[n].basicTypeString != nullptr; ++n)
+    {
+        if (BasicTypeMapMSVC[n].baseType == BaseType)
+        {
+            if (BasicTypeMapMSVC[n].length == size ||
+                BasicTypeMapMSVC[n].length == 0)
+            {
+                return BasicTypeMapMSVC[n].typeString; //TODO NULL ???
+            }
+        }
+    }
 
-	for (int n = 0; TypeMap[n].BasicTypeString != nullptr; ++n)
-	{
-		if (TypeMap[n].BaseType == BaseType)
-		{
-			if (TypeMap[n].Length == Size ||
-			    TypeMap[n].Length == 0)
-			{
-				return TypeMap[n].TypeString; //TODO NULL ???
-			}
-		}
-	}
-
-	return "<NoType>"; //nullptr;
+    return "<NoType>"; //nullptr;
 }
 
-const CHAR* PDB::GetBasicTypeString(IN const SYMBOL* Symbol)
+const std::string PDB::GetBasicTypeString(const Symbol& symbol)
 {
-	return GetBasicTypeString(Symbol->BaseType, Symbol->Size);
+    return GetBasicTypeString(symbol.baseType, symbol.size);
 }
 
-const CHAR* PDB::GetUdtKindString(IN UdtKind Kind)
+const std::string PDB::GetUdtKindString(UdtKind kind)
 {
-	static const CHAR* UdtKindStrings[] = {
-		"struct",
-		"class",
-		"union",
-	};
+    static const CHAR* UdtKindStrings[] = {
+        "struct",
+        "class",
+        "union",
+    };
 
-	if (Kind >= UdtStruct && Kind <= UdtUnion)
-	{
-		return UdtKindStrings[Kind];
-	}
+    if (kind >= UdtStruct && kind <= UdtUnion)
+    {
+        return UdtKindStrings[kind];
+    }
 
-	return nullptr;
+    return {};
 }
 
-BOOL PDB::IsUnnamedSymbol(const SYMBOL* Symbol)
+bool PDB::IsUnnamedSymbol(const Symbol& symbol)
 {
-	return strstr(Symbol->Name, "<anonymous-") != nullptr ||
-	       strstr(Symbol->Name, "<unnamed-") != nullptr ||
-	       strstr(Symbol->Name, "__unnamed") != nullptr;
+    return strstr(symbol.name.c_str(), "<anonymous-") != nullptr ||
+           strstr(symbol.name.c_str(), "<unnamed-") != nullptr ||
+           strstr(symbol.name.c_str(), "__unnamed") != nullptr;
+}
+
+const SymbolUdtField* SymbolUdt::FieldFirst() const
+{
+    return &fields.at(0);
+}
+
+const SymbolUdtField* SymbolUdt::FieldLast() const
+{
+    return &fields[fields.size() - 1];
+}
+
+const SymbolUdtField* SymbolUdt::FieldNext(const SymbolUdtField* Field) const
+{
+    return Field == FieldLast() ? FieldLast() : &Field[1];
+}
+
+const SymbolUdtField* SymbolUdt::FindFieldNext(const SymbolUdtField* Field) const
+{
+    while ((Field = FieldNext(Field)) != FieldLast()
+           && (Field->tag != SymTagData)
+           && (Field->dataKind == DataIsStaticMember));
+    return Field;
 }

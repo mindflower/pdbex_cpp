@@ -6,93 +6,105 @@
 #include <vector>
 #include <map>
 
-class PDBSymbolSorter
-	: public PDBSymbolSorterBase
+class PDBSymbolSorter : public PDBSymbolSorterBase
 {
 public:
-	std::vector<const SYMBOL*>& GetSortedSymbols() override	{ return m_SortedSymbols; }
-	ImageArchitecture GetImageArchitecture() const override { return m_Architecture; }
+    std::vector<DWORD>& GetSortedSymbolIndexes() override
+    {
+        return m_sortedSymbolIndexes;
+    }
 
-	void Clear() override
-	{
-		ImageArchitecture m_Architecture = ImageArchitecture::None;
+    ImageArchitecture GetImageArchitecture() const override
+    {
+        return m_architecture;
+    }
 
-		m_VisitedUdts.clear();
-		m_SortedSymbols.clear();
-	}
+    void Clear() override
+    {
+        ImageArchitecture m_architecture = ImageArchitecture::None;
+
+        m_visitedUdts.clear();
+        m_sortedSymbolIndexes.clear();
+    }
 
 protected:
-	void VisitEnumType(const SYMBOL* Symbol) override
-	{
-		if (HasBeenVisited(Symbol)) return;
+    void VisitEnumType(const Symbol& symbol) override
+    {
+        if (HasBeenVisited(symbol))
+        {
+            return;
+        }
 
-		AddSymbol(Symbol);
-	}
+        AddSymbol(symbol);
+    }
 
-	void VisitPointerType(const SYMBOL* Symbol) override
-	{
-		if (m_Architecture == ImageArchitecture::None)
-		{
-			switch (Symbol->Size)
-			{
-			case 4:
-				m_Architecture = ImageArchitecture::x86;
-				break;
-			case 8:
-				m_Architecture = ImageArchitecture::x64;
-				break;
-			default:
-				assert(0);
-				break;
-			}
-		}
-	}
+    void VisitPointerType(const Symbol& symbol) override
+    {
+        if (m_architecture == ImageArchitecture::None)
+        {
+            switch (symbol.size)
+            {
+            case 4:
+                m_architecture = ImageArchitecture::x86;
+                break;
+            case 8:
+                m_architecture = ImageArchitecture::x64;
+                break;
+            default:
+                assert(0);
+                break;
+            }
+        }
+    }
 
-	void VisitUdt(const SYMBOL* Symbol) override
-	{
-		if (HasBeenVisited(Symbol)) return;
+    void VisitUdt(const Symbol& symbol) override
+    {
+        if (HasBeenVisited(symbol))
+        {
+            return;
+        }
 
-		PDBSymbolVisitorBase::VisitUdt(Symbol);
+        PDBSymbolVisitorBase::VisitUdt(symbol);
 
-		AddSymbol(Symbol);
-	}
+        AddSymbol(symbol);
+    }
 
-	void VisitUdtField(const SYMBOL_UDT_FIELD* UdtField) override
-	{
-		Visit(UdtField->Type);
-	}
+    void VisitUdtField(const SymbolUdtField& udtField) override
+    {
+        assert(udtField.type);
+        Visit(*udtField.type);
+    }
 
 private:
-	bool HasBeenVisited(const SYMBOL* Symbol)
-	{
-		static DWORD UnnamedCounter = 0;
+    bool HasBeenVisited(const Symbol& symbol)
+    {
+        static DWORD UnnamedCounter = 0;
 
-		std::string Key = Symbol->Name;
-		if (m_VisitedUdts.find(Key) != m_VisitedUdts.end())
-		{
-			return true;
-		} else
-		{
-			if (PDB::IsUnnamedSymbol(Symbol))
-			{
-				Key += std::to_string(++UnnamedCounter);
-			}
+        auto key = symbol.name;
+        if (m_visitedUdts.find(key) != m_visitedUdts.end())
+        {
+            return true;
+        }
 
-			m_VisitedUdts[Key] = Symbol;
-			return false;
-		}
-	}
+        if (PDB::IsUnnamedSymbol(symbol))
+        {
+            key += std::to_string(++UnnamedCounter);
+        }
 
-	void AddSymbol(const SYMBOL* Symbol)
-	{
-		if (std::find(m_SortedSymbols.begin(), m_SortedSymbols.end(), Symbol) == m_SortedSymbols.end())
-		{
-			m_SortedSymbols.push_back(Symbol);
-		}
-	}
+        m_visitedUdts.emplace(std::move(key), symbol.symIndexId);
+        return false;
+    }
 
-	ImageArchitecture m_Architecture = ImageArchitecture::None;
+    void AddSymbol(const Symbol& symbol)
+    {
+        if (std::find(m_sortedSymbolIndexes.begin(), m_sortedSymbolIndexes.end(), symbol.symIndexId) == m_sortedSymbolIndexes.end())
+        {
+            m_sortedSymbolIndexes.push_back(symbol.symIndexId);
+        }
+    }
 
-	std::map<std::string, const SYMBOL*> m_VisitedUdts;
-	std::vector<const SYMBOL*> m_SortedSymbols;
+    ImageArchitecture m_architecture = ImageArchitecture::None;
+
+    std::map<std::string, DWORD> m_visitedUdts;
+    std::vector<DWORD> m_sortedSymbolIndexes;
 };

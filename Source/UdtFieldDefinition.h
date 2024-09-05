@@ -1,196 +1,264 @@
 #pragma once
 #include "UdtFieldDefinitionBase.h"
 
-#include <string>
 #include <stack>
 #include <vector>
 
-class UdtFieldDefinition
-	: public UdtFieldDefinitionBase
+class UdtFieldDefinition : public UdtFieldDefinitionBase
 {
 public:
-	void VisitBaseType(const SYMBOL* Symbol) override
-	{
-		if (Symbol->BaseType == btFloat && Symbol->Size == 10)
-			m_Comment += " /* 80-bit float */";
+    void VisitBaseType(const Symbol& symbol) override
+    {
+        if (symbol.baseType == btFloat && symbol.size == 10)
+        {
+            m_comment += " /* 80-bit float */";
+        }
 
-		if (Symbol->IsConst)	m_TypePrefix += "const ";
-		if (Symbol->IsVolatile)	m_TypePrefix += "volatile ";
-		m_TypePrefix += PDB::GetBasicTypeString(Symbol);
-	}
+        if (symbol.isConst)
+        {
+            m_typePrefix += "const ";
+        }
 
-	void VisitTypedefTypeEnd(const SYMBOL* Symbol) override
-	{
-		m_TypePrefix = "typedef " + m_TypePrefix;
-	}
+        if (symbol.isVolatile)
+        {
+            m_typePrefix += "volatile ";
+        }
 
-	void VisitEnumType(const SYMBOL* Symbol) override
-	{
-		if (Symbol->IsConst)	m_TypePrefix += "const ";
-		if (Symbol->IsVolatile)	m_TypePrefix += "volatile ";
-		m_TypePrefix += Symbol->Name;
-	}
+        m_typePrefix += PDB::GetBasicTypeString(symbol);
+    }
 
-	void VisitUdtType(const SYMBOL* Symbol) override
-	{
-		if (Symbol->IsConst)	m_TypePrefix += "const ";
-		if (Symbol->IsVolatile)	m_TypePrefix += "volatile ";
+    void VisitTypedefTypeEnd(const Symbol& symbol) override
+    {
+        m_typeSuffix = " = " + m_typePrefix;
+        m_typePrefix = "using";
+    }
 
-		//m_TypePrefix += PDB::GetUdtKindString(Symbol->u.Udt.Kind);
-		//m_TypePrefix += " ";
-		m_TypePrefix += Symbol->Name;
-	}
+    void VisitEnumType(const Symbol& symbol) override
+    {
+        if (symbol.isConst)
+        {
+            m_typePrefix += "const ";
+        }
 
-	void VisitPointerTypeEnd(const SYMBOL* Symbol) override
-	{
-		if (Symbol->u.Pointer.Type->Tag == SymTagFunctionType)
-		{
-			if (Symbol->u.Pointer.IsReference)
-				m_MemberName = "& " + m_MemberName;
-			else	m_MemberName = "* " + m_MemberName;
+        if (symbol.isVolatile)
+        {
+            m_typePrefix += "volatile ";
+        }
 
-			if (Symbol->IsConst)	m_MemberName += " const";
-			if (Symbol->IsVolatile)	m_MemberName += " volatile";
+        m_typePrefix += symbol.name;
+    }
 
-			m_MemberName = "(" + m_MemberName + ")";
+    void VisitUdtType(const Symbol& symbol) override
+    {
+        if (symbol.isConst)
+        {
+            m_typePrefix += "const ";
+        }
 
-			return;
-		}
+        if (symbol.isVolatile)
+        {
+            m_typePrefix += "volatile ";
+        }
 
-		if (Symbol->u.Pointer.IsReference)
-			m_TypePrefix += "&";
-		else	m_TypePrefix += "*";
+        m_typePrefix += symbol.name;
+    }
 
-		if (Symbol->IsConst)	m_TypePrefix += " const";
-		if (Symbol->IsVolatile)	m_TypePrefix += " volatile";
-	}
+    void VisitPointerTypeEnd(const Symbol& symbol) override
+    {
+        const auto& symbolPointer = std::get<SymbolPointer>(symbol.variant);
 
-	void VisitArrayTypeEnd(const SYMBOL* Symbol) override
-	{
-		if (Symbol->u.Array.ElementCount == 0)
-		{
-			const_cast<SYMBOL*>(Symbol)->Size = 1;
-			m_TypeSuffix += "[]";
-		} else
-		{
-			m_TypeSuffix += "[" + std::to_string(Symbol->u.Array.ElementCount) + "]";
-		}
-	}
+        assert(symbolPointer.type);
+        if (symbolPointer.type->tag == SymTagFunctionType)
+        {
+            if (symbolPointer.isReference)
+            {
+                m_memberName = "& " + m_memberName;
+            }
+            else
+            {
+                m_memberName = "* " + m_memberName;
+            }
 
-	void VisitFunctionTypeBegin(const SYMBOL* Symbol) override
-	{
-		if (m_Funcs.size())
-		{
-			if (m_Funcs.top().Name == m_MemberName)
-				m_MemberName = "";
-		}
+            if (symbol.isConst)
+            {
+                m_memberName += " const";
+            }
+            if (symbol.isVolatile)
+            {
+                m_memberName += " volatile";
+            }
 
-		m_Funcs.push(Function{m_MemberName, m_Args});
-		m_MemberName = "";
-	}
+            m_memberName = "(" + m_memberName + ")";
+            return;
+        }
 
-	void VisitFunctionTypeEnd(const SYMBOL* Symbol) override
-	{
-		if (Symbol->u.Function.IsStatic)
-		{
-			m_TypePrefix = "static " + m_TypePrefix;
-		} else
-		if (Symbol->u.Function.IsVirtual)
-		{
-			m_TypePrefix = "virtual " + m_TypePrefix;
-		}
-	#if 0
-		std::string Access;
-		switch (Symbol->u.Function.Access)
-		{
-		case 1: Access = "private "; break;
-		case 2: Access = "protected "; break;
-		case 3: Access = "public "; break;
-		}
-		m_TypePrefix = Access + m_TypePrefix;
-	#endif
-		if (Symbol->u.Function.IsConst)		m_Comment += " const";
-		if (Symbol->u.Function.IsOverride)	m_Comment += " override";
-		if (Symbol->u.Function.IsPure)		m_Comment += " = 0";
+        if (symbolPointer.isReference)
+        {
+            m_typePrefix += "&";
+        }
+        else
+        {
+            m_typePrefix += "*";
+        }
 
-		if (Symbol->u.Function.IsVirtual)
-		{
-			char hexbuf[16];
-			snprintf(hexbuf, sizeof(hexbuf), " 0x%02x ", Symbol->u.Function.VirtualOffset);
-			m_Comment += " /*" + std::string(hexbuf) + "*/";
-		}
+        if (symbol.isConst)
+        {
+            m_typePrefix += " const";
+        }
 
-		if (m_TypeSuffix.size())
-			m_TypePrefix = GetPrintableDefinition();
+        if (symbol.isVolatile)
+        {
+            m_typePrefix += " volatile";
+        }
+    }
 
-		m_TypeSuffix = "";
+    void VisitArrayTypeEnd(const Symbol& symbol) override
+    {
+        const auto& symbolArray = std::get<SymbolArray>(symbol.variant);
+        if (symbolArray.elementCount == 0)
+        {
+            const_cast<Symbol&>(symbol).size = 1;	//TODO
+            m_typeSuffix += "[]";
+        }
+        else
+        {
+            m_typeSuffix += "[" + std::to_string(symbolArray.elementCount) + "]";
+        }
+    }
 
-		for (auto && e : m_Args)
-		{
-			if (m_TypeSuffix.size()) m_TypeSuffix += ", ";
-			m_TypeSuffix += e;
-		}
-		m_TypeSuffix = "(" + m_TypeSuffix + ")";
+    void VisitFunctionTypeBegin(const Symbol& symbol) override
+    {
+        if (m_funcs.size())
+        {
+            if (m_funcs.top().name == m_memberName)
+            {
+                m_memberName = "";
+            }
+        }
 
-		Function func = m_Funcs.top();
+        m_funcs.push(Function{ m_memberName, m_args });
+        m_memberName = "";
+    }
 
-		m_Funcs.pop();
+    void VisitFunctionTypeEnd(const Symbol& symbol) override
+    {
+        const auto& symbolFunction = std::get<SymbolFunction>(symbol.variant);
+        if (symbolFunction.isStatic)
+        {
+            m_typePrefix = "static " + m_typePrefix;
+        }
+        else if (symbolFunction.isVirtual)
+        {
+            m_typePrefix = "virtual " + m_typePrefix;
+        }
 
-		m_Args = func.Args;
-		m_MemberName = func.Name;
-	}
+        if (symbolFunction.isConst)
+        {
+            m_comment += " const";
+        }
 
-	void VisitFunctionArgTypeBegin(const SYMBOL* Symbol) override
-	{
-		Function func = m_Funcs.top();
-		//TODO
-	}
+        if (symbolFunction.isOverride)
+        {
+            m_comment += " override";
+        }
 
-	void VisitFunctionArgTypeEnd(const SYMBOL* Symbol) override
-	{
-		std::string ArgName;
-		if (Symbol->Name) ArgName = std::string(" ") + Symbol->Name;
+        if (symbolFunction.isPure)
+        {
+            m_comment += " = 0";
+        }
 
-		if (m_MemberName.find('(') == std::string::npos)
-		{
-			m_Args.push_back(m_TypePrefix + ArgName);
-			m_TypeSuffix = "";
-			m_TypePrefix = "";
-		} else
-		{
-			m_TypeSuffix = GetPrintableDefinition();
-			m_Args.push_back(m_TypeSuffix + ArgName);
-			m_TypeSuffix = "";
-			m_TypePrefix = "";
-		}
+        if (symbolFunction.isVirtual)
+        {
+            char hexbuf[16] = {};
+            snprintf(hexbuf, sizeof(hexbuf), " 0x%02x ", symbolFunction.virtualOffset);
+            m_comment += " /*" + std::string(hexbuf) + "*/";
+        }
 
-		Function func = m_Funcs.top();
+        if (m_typeSuffix.size())
+        {
+            m_typePrefix = GetPrintableDefinition();
+        }
 
-		m_MemberName = func.Name;
-		//TODO
-	}
+        m_typeSuffix = "";
 
-	void SetMemberName(const CHAR* MemberName) override
-	{
-		m_MemberName = MemberName ? MemberName : std::string();
-	}
+        for (const auto& arg : m_args)
+        {
+            if (m_typeSuffix.size())
+            {
+                m_typeSuffix += ", ";
+            }
+            m_typeSuffix += arg;
+        }
+        m_typeSuffix = "(" + m_typeSuffix + ")";
 
-	std::string GetPrintableDefinition() const override
-	{
-		return m_TypePrefix + " " + m_MemberName + m_TypeSuffix + m_Comment;
-	}
+        auto func = m_funcs.top();
+
+        m_funcs.pop();
+
+        m_args = std::move(func.args);
+        m_memberName = std::move(func.name);
+    }
+
+    void VisitFunctionArgTypeBegin(const Symbol& symbol) override
+    {
+        //Function func = m_funcs.top();
+        //TODO
+    }
+
+    void VisitFunctionArgTypeEnd(const Symbol& symbol) override
+    {
+        std::string argName;
+        if (!symbol.name.empty())
+        {
+            argName = std::string(" ") + symbol.name;
+        }
+
+        if (m_memberName.find('(') == std::string::npos)
+        {
+            m_args.push_back(m_typePrefix + argName);
+            m_typeSuffix = "";
+            m_typePrefix = "";
+        }
+        else
+        {
+            m_typeSuffix = GetPrintableDefinition();
+            m_args.push_back(m_typeSuffix + argName);
+            m_typeSuffix = "";
+            m_typePrefix = "";
+        }
+
+        auto func = m_funcs.top();
+
+        m_memberName = std::move(func.name);
+        //TODO
+    }
+
+    void SetMemberName(const std::string& memberName) override
+    {
+        m_memberName = memberName;
+    }
+
+    std::string GetPrintableDefinition() const override
+    {
+        std::string res;
+        if (!m_typePrefix.empty())
+        {
+            res += m_typePrefix + " ";
+        }
+        return res + m_memberName + m_typeSuffix + m_comment;
+    }
 
 private:
-	struct Function
-	{
-		std::string Name;
-		std::vector<std::string> Args;
-	};
+    struct Function
+    {
+        std::string name;
+        std::vector<std::string> args;
+    };
 
-	std::string m_TypePrefix;
-	std::string m_MemberName;
-	std::string m_TypeSuffix;
-	std::string m_Comment;
-	std::stack<Function> m_Funcs;
-	std::vector<std::string> m_Args;
+    std::string m_typePrefix;
+    std::string m_memberName;
+    std::string m_typeSuffix;
+    std::string m_comment;
+    std::stack<Function> m_funcs;
+    std::vector<std::string> m_args;
 };

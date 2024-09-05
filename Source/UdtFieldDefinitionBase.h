@@ -1,32 +1,32 @@
 #pragma once
 #include "PDB.h"
 
-#include <string>
-
 class UdtFieldDefinitionBase
 {
 public:
-	virtual	void VisitBaseType(const SYMBOL* Symbol) {}
+    virtual ~UdtFieldDefinitionBase() = default;
 
-	virtual void VisitTypedefTypeBegin(const SYMBOL* Symbol) {}
-	virtual	void VisitTypedefTypeEnd(const SYMBOL* Symbol) {}
+    virtual	void VisitBaseType(const Symbol& symbol) {}
 
-	virtual	void VisitEnumType(const SYMBOL* Symbol) {}
-	virtual	void VisitUdtType(const SYMBOL* Symbol) {}
+    virtual void VisitTypedefTypeBegin(const Symbol& symbol) {}
+    virtual	void VisitTypedefTypeEnd(const Symbol& symbol) {}
 
-	virtual void VisitPointerTypeBegin(const SYMBOL* Symbol) {}
-	virtual	void VisitPointerTypeEnd(const SYMBOL* Symbol) {}
+    virtual	void VisitEnumType(const Symbol& symbol) {}
+    virtual	void VisitUdtType(const Symbol& symbol) {}
 
-	virtual	void VisitArrayTypeBegin(const SYMBOL* Symbol) {}
-	virtual	void VisitArrayTypeEnd(const SYMBOL* Symbol) {}
+    virtual void VisitPointerTypeBegin(const Symbol& symbol) {}
+    virtual	void VisitPointerTypeEnd(const Symbol& symbol) {}
 
-	virtual	void VisitFunctionTypeBegin(const SYMBOL* Symbol) {}
-	virtual	void VisitFunctionTypeEnd(const SYMBOL* Symbol) {}
+    virtual	void VisitArrayTypeBegin(const Symbol& symbol) {}
+    virtual	void VisitArrayTypeEnd(const Symbol& symbol) {}
 
-	virtual	void VisitFunctionArgTypeBegin(const SYMBOL* Symbol) {}
-	virtual void VisitFunctionArgTypeEnd(const SYMBOL* Symbol) {}
+    virtual	void VisitFunctionTypeBegin(const Symbol& symbol) {}
+    virtual	void VisitFunctionTypeEnd(const Symbol& symbol) {}
 
-	virtual	void SetMemberName(const CHAR* MemberName) {}
+    virtual	void VisitFunctionArgTypeBegin(const Symbol& symbol) {}
+    virtual void VisitFunctionArgTypeEnd(const Symbol& symbol) {}
 
-	virtual	std::string GetPrintableDefinition() const { return std::string(); }
+    virtual	void SetMemberName(const std::string& memberName) {}
+
+    virtual	std::string GetPrintableDefinition() const { return {}; }
 };
