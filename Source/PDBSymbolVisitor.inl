@@ -210,24 +210,33 @@ void PDBSymbolVisitor<MEMBER_DEFINITION_TYPE>::CheckForDataFieldPadding(const Sy
     UdtFieldContext UdtFieldCtx(udtField);
     DWORD PreviousUdtFieldOffset = 0;
     DWORD SizeOfPreviousUdtField = 0;
+    DWORD BaseClassOffset = 0;
+    bool IsPreviousTypedef = false;
+
+    const auto& BaseClassFields = std::get<SymbolUdt>(udtField->parent->variant).baseClassFields;
+    for (const auto& Field : BaseClassFields)
+    {
+        BaseClassOffset += Field.type->size;
+    }
 
     if (UdtFieldCtx.IsFirst() == false)
     {
         PreviousUdtFieldOffset = m_previousUdtField->offset;
         SizeOfPreviousUdtField = m_sizeOfPreviousUdtField;
+        IsPreviousTypedef = m_previousUdtField->tag == SymTagTypedef;
     }
 
-    if (PreviousUdtFieldOffset + SizeOfPreviousUdtField < udtField->offset)
+    if (!IsPreviousTypedef &&
+        BaseClassOffset < udtField->offset &&
+        PreviousUdtFieldOffset + SizeOfPreviousUdtField < udtField->offset)
     {
         DWORD Difference = udtField->offset - (PreviousUdtFieldOffset + SizeOfPreviousUdtField);
 
-        BOOL DifferenceIsDivisibleBy4 = !(Difference % 4);
-
         m_reconstructVisitor->OnPaddingMember(
             *udtField,
-            DifferenceIsDivisibleBy4 ? btLong : btChar,
-            DifferenceIsDivisibleBy4 ? 4 : 1,
-            DifferenceIsDivisibleBy4 ? Difference / 4 : Difference
+            btChar,
+            1,
+            Difference
         );
     }
 }

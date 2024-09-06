@@ -783,6 +783,7 @@ namespace
         { btNoType,       0,  "btNoType",         "..."              }, //nullptr
         { btVoid,         0,  "btVoid",           "void"             },
         { btChar,         1,  "btChar",           "char"             },
+        { btChar8,        1,  "btChar8",          "char8_t"          },
         { btChar16,       2,  "btChar16",         "char16_t"         },
         { btChar32,       4,  "btChar32",         "char32_t"         },
         { btWChar,        2,  "btWChar",          "wchar_t"          },
@@ -794,7 +795,7 @@ namespace
         { btUInt,         1,  "btUInt",           "unsigned char"    },
         { btUInt,         2,  "btUInt",           "unsigned short"   },
         { btUInt,         4,  "btUInt",           "unsigned int"     },
-        { btUInt,         8,  "btUInt",           "unsigned __int64" },
+        { btUInt,         8,  "btUInt",           "uint64_t"         },
         { btUInt,        16,  "btUInt",           "__m128"           },
         { btFloat,        4,  "btFloat",          "float"            },
         { btFloat,        8,  "btFloat",          "double"           },

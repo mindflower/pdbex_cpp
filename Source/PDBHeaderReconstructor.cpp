@@ -234,9 +234,10 @@ void PDBHeaderReconstructor::OnUdtFieldBegin(const SymbolUdtField& udtField)
 
 	WriteIndent();
 	assert(udtField.type);
-	if (udtField.type->tag != SymTagFunction &&
+	if (udtField.dataKind != DataIsStaticMember &&
+        udtField.type->tag != SymTagFunction &&
 	    udtField.type->tag != SymTagTypedef &&
-        udtField.dataKind != DataIsStaticMember &&
+        (udtField.type->tag != SymTagEnum || udtField.tag != SymTagEnum) &&
 	    (udtField.type->tag != SymTagUDT ||
         (udtField.tag != SymTagUDT && ShouldExpand(*udtField.type) == false)))
 	{
@@ -263,6 +264,12 @@ void PDBHeaderReconstructor::OnUdtField(const SymbolUdtField& udtField, UdtField
         memberDefinition.SetMemberName("");
         Write(PDB::GetUdtKindString(std::get<SymbolUdt>(udtField.type->variant).kind).c_str());
         Write(" ");
+    }
+
+    if (udtField.tag == SymTagEnum && udtField.type->tag == SymTagEnum)
+    {
+        memberDefinition.SetMemberName("");
+        Write("enum ");
     }
 
 	Write("%s", memberDefinition.GetPrintableDefinition().c_str());
