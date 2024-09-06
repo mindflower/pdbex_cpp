@@ -236,8 +236,9 @@ void PDBHeaderReconstructor::OnUdtFieldBegin(const SymbolUdtField& udtField)
 	assert(udtField.type);
 	if (udtField.type->tag != SymTagFunction &&
 	    udtField.type->tag != SymTagTypedef &&
+        udtField.dataKind != DataIsStaticMember &&
 	    (udtField.type->tag != SymTagUDT ||
-	    ShouldExpand(*udtField.type) == false))
+        (udtField.tag != SymTagUDT && ShouldExpand(*udtField.type) == false)))
 	{
 		WriteOffset(udtField, GetParentOffset());
 	}
