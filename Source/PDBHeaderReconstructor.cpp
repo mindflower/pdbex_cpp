@@ -257,6 +257,13 @@ void PDBHeaderReconstructor::OnUdtField(const SymbolUdtField& udtField, UdtField
 		Write("static ");
 	}
 
+    if (udtField.tag == SymTagUDT && udtField.type->tag == SymTagUDT)
+    {
+        memberDefinition.SetMemberName("");
+        Write(PDB::GetUdtKindString(std::get<SymbolUdt>(udtField.type->variant).kind).c_str());
+        Write(" ");
+    }
+
 	Write("%s", memberDefinition.GetPrintableDefinition().c_str());
 
 	if (udtField.bits != 0)

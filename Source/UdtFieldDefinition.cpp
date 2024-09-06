@@ -237,7 +237,7 @@ std::string UdtFieldDefinition::GetPrintableDefinition() const
     std::string res;
     if (!m_typePrefix.empty())
     {
-        res += m_typePrefix + " ";
+        res += m_typePrefix + ' ';
     }
     return res + m_memberName + m_typeSuffix + m_comment;
 }
