@@ -301,7 +301,8 @@ void PDBSymbolVisitor<MEMBER_DEFINITION_TYPE>::CheckForAnonymousStruct(const Sym
               UdtFieldCtx.nextUdtField->offset < m_anonymousUdtStack.top()->first->offset + m_anonymousUdtStack.top()->size
               ))
             && UdtFieldCtx.nextUdtField->tag == SymTagData
-            && udtField->tag == SymTagData)
+            && udtField->tag == SymTagData
+            && UdtFieldCtx.nextUdtField->dataKind != DataIsStaticMember)
         {
             do {
                 bool IsEndOfAnonymousStruct =
@@ -352,6 +353,7 @@ void PDBSymbolVisitor<MEMBER_DEFINITION_TYPE>::CheckForEndOfAnonymousUdt(const S
 
             IsEndOfAnonymousUdt =
                 UdtFieldCtx.IsLast() ||
+                UdtFieldCtx.nextUdtField->tag != SymTagData ||
                 UdtFieldCtx.nextUdtField->offset < udtField->offset ||
                 (UdtFieldCtx.nextUdtField->offset == udtField->offset + LastAnonymousUdt->size) ||
                 (UdtFieldCtx.nextUdtField->offset == udtField->offset + 8 && Is64BitBasicType(*UdtFieldCtx.nextUdtField->type)) ||
@@ -453,4 +455,76 @@ template <typename MEMBER_DEFINITION_TYPE>
 bool PDBSymbolVisitor<MEMBER_DEFINITION_TYPE>::Is64BitBasicType(const Symbol& symbol)
 {
     return (symbol.tag == SymTagBaseType && symbol.size == 8);
+}
+
+template<typename MEMBER_DEFINITION_TYPE>
+PDBSymbolVisitor<MEMBER_DEFINITION_TYPE>::AnonymousUdt::AnonymousUdt(UdtKind kind, const SymbolUdtField* first, const SymbolUdtField* last, DWORD size, DWORD memberCount)
+{
+    this->kind = kind;
+    this->first = first;
+    this->last = last;
+    this->size = size;
+    this->memberCount = memberCount;
+}
+
+template<typename MEMBER_DEFINITION_TYPE>
+PDBSymbolVisitor<MEMBER_DEFINITION_TYPE>::BitFieldRange::BitFieldRange() : first(nullptr), last(nullptr)
+{
+}
+
+template<typename MEMBER_DEFINITION_TYPE>
+void PDBSymbolVisitor<MEMBER_DEFINITION_TYPE>::BitFieldRange::Clear()
+{
+    first = nullptr;
+    last = nullptr;
+}
+
+template<typename MEMBER_DEFINITION_TYPE>
+bool PDBSymbolVisitor<MEMBER_DEFINITION_TYPE>::BitFieldRange::HasValue() const
+{
+    return /*First != nullptr &&*/
+        last != nullptr;
+}
+
+template<typename MEMBER_DEFINITION_TYPE>
+PDBSymbolVisitor<MEMBER_DEFINITION_TYPE>::UdtFieldContext::UdtFieldContext(const SymbolUdtField* udtField, BOOL respectBitFields)
+{
+    this->udtField = udtField;
+
+    previousUdtField = &udtField[-1];
+    currentUdtField = &udtField[0];
+    nextUdtField = std::get<SymbolUdt>(udtField->parent->variant).FindFieldNext(udtField);
+
+    this->respectBitFields = respectBitFields;
+
+    if (respectBitFields)
+    {
+        nextUdtField = GetNextUdtFieldWithRespectToBitFields(udtField);
+    }
+}
+
+template<typename MEMBER_DEFINITION_TYPE>
+bool PDBSymbolVisitor<MEMBER_DEFINITION_TYPE>::UdtFieldContext::IsFirst() const
+{
+    return previousUdtField < std::get<SymbolUdt>(udtField->parent->variant).FieldFirst();
+}
+
+template<typename MEMBER_DEFINITION_TYPE>
+bool PDBSymbolVisitor<MEMBER_DEFINITION_TYPE>::UdtFieldContext::IsLast() const
+{
+    return nextUdtField == std::get<SymbolUdt>(udtField->parent->variant).FieldLast();
+}
+
+template<typename MEMBER_DEFINITION_TYPE>
+bool PDBSymbolVisitor<MEMBER_DEFINITION_TYPE>::UdtFieldContext::GetNext()
+{
+    previousUdtField = currentUdtField;
+    currentUdtField = nextUdtField;
+    nextUdtField = std::get<SymbolUdt>(udtField->parent->variant).FindFieldNext(currentUdtField);
+
+    if (respectBitFields && IsLast() == false)
+    {
+        nextUdtField = GetNextUdtFieldWithRespectToBitFields(currentUdtField);
+    }
+    return IsLast() == false;
 }

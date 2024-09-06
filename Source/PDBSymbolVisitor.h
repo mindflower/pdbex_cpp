@@ -11,10 +11,9 @@ class PDBSymbolVisitor : public PDBSymbolVisitorBase
 {
 public:
     PDBSymbolVisitor(PDBReconstructorBase* reconstructVisitor);
-
     void Run(const Symbol& symbol);
-protected:
 
+protected:
     void Visit(const Symbol& symbol) override;
     void VisitBaseType(const Symbol& symbol) override;
     void VisitEnumType(const Symbol& symbol) override;
@@ -37,15 +36,7 @@ private:
         AnonymousUdt(UdtKind kind,
                      const SymbolUdtField* first, const SymbolUdtField* last,
                      DWORD size = 0,
-                     DWORD memberCount = 0
-        )
-        {
-            this->kind = kind;
-            this->first = first;
-            this->last = last;
-            this->size = size;
-            this->memberCount = memberCount;
-        }
+                     DWORD memberCount = 0);
 
         const SymbolUdtField* first;
         const SymbolUdtField* last;
@@ -59,56 +50,21 @@ private:
         const SymbolUdtField* first;
         const SymbolUdtField* last;
 
-        BitFieldRange() : first(nullptr), last(nullptr)
-        {
-        }
+        BitFieldRange();
 
-        void Clear()
-        {
-            first = nullptr;
-            last = nullptr;
-        }
+        void Clear();
 
-        bool HasValue() const
-        {
-            return /*First != nullptr &&*/
-                last != nullptr;
-        }
+        bool HasValue() const;
     };
 
     struct UdtFieldContext
     {
-        UdtFieldContext(const SymbolUdtField* udtField, BOOL respectBitFields = TRUE)
-        {
-            this->udtField = udtField;
+        UdtFieldContext(const SymbolUdtField* udtField, BOOL respectBitFields = TRUE);
 
-            previousUdtField = &udtField[-1];
-            currentUdtField = &udtField[0];
-            nextUdtField = std::get<SymbolUdt>(udtField->parent->variant).FindFieldNext(udtField);
+        bool IsFirst() const;
+        bool IsLast() const;
 
-            this->respectBitFields = respectBitFields;
-
-            if (respectBitFields)
-            {
-                nextUdtField = GetNextUdtFieldWithRespectToBitFields(udtField);
-            }
-        }
-
-        bool IsFirst() const { return previousUdtField < std::get<SymbolUdt>(udtField->parent->variant).FieldFirst(); }
-        bool IsLast() const { return nextUdtField == std::get<SymbolUdt>(udtField->parent->variant).FieldLast(); }
-
-        bool GetNext()
-        {
-            previousUdtField = currentUdtField;
-            currentUdtField = nextUdtField;
-            nextUdtField = std::get<SymbolUdt>(udtField->parent->variant).FindFieldNext(currentUdtField);
-
-            if (respectBitFields && IsLast() == false)
-            {
-                nextUdtField = GetNextUdtFieldWithRespectToBitFields(currentUdtField);
-            }
-            return IsLast() == false;
-        }
+        bool GetNext();
 
         const SymbolUdtField* udtField;
 

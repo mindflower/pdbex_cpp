@@ -123,6 +123,9 @@ using SymbolNameMap = std::unordered_map<std::string, SymbolPtr>;
 using SymbolSet = std::unordered_set<SymbolPtr>;
 using FunctionSet = std::set<std::string>;
 
+using DiaSymbolPtr = ATL::CComPtr<IDiaSymbol>;
+using DiaEnumSymbolsPtr = ATL::CComPtr<IDiaEnumSymbols>;
+
 class SymbolModuleBase
 {
 public:
@@ -142,10 +145,6 @@ protected:
     ATL::CComPtr<IDiaSession> m_session;
     ATL::CComPtr<IDiaSymbol> m_globalSymbol;
 };
-
-
-using DiaSymbolPtr = ATL::CComPtr<IDiaSymbol>;
-using DiaEnumSymbolsPtr = ATL::CComPtr<IDiaEnumSymbols>;
 
 class SymbolModule : public SymbolModuleBase
 {
