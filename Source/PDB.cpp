@@ -606,7 +606,6 @@ void SymbolModule::ProcessSymbolUdt(const DiaSymbolPtr& diaSymbol, const SymbolP
         member.parent = symbol;
         member.isBaseClass = false;
 
-
         member.tag = static_cast<enum SymTagEnum>(symTag);
         member.dataKind = static_cast<enum DataKind>(0); //???
 
@@ -662,9 +661,10 @@ void SymbolModule::ProcessSymbolUdt(const DiaSymbolPtr& diaSymbol, const SymbolP
             {
                 auto& memberTypeFunction = std::get<SymbolFunction>(member.type->variant);
 
-                const char* s = strstr(member.name.c_str(), symbol->name.c_str());
-                if ((s != nullptr && s[-1] == '~') ||
-                    strcmp(member.name.c_str(), symbol->name.c_str()) == 0)
+                // Check if ctor or dtor
+                const auto nsPos = symbol->name.rfind("::");
+                const auto nameWithoutNS = nsPos == std::string::npos ? symbol->name : symbol->name.substr(nsPos + 2);
+                if (member.name == nameWithoutNS || member.name == '~' + nameWithoutNS)
                 {
                     memberTypeFunction.returnType = nullptr;
                 }
