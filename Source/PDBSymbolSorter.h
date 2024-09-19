@@ -16,6 +16,7 @@ protected:
     void VisitPointerType(const Symbol& symbol) override;
     void VisitUdt(const Symbol& symbol) override;
     void VisitUdtField(const SymbolUdtField& udtField) override;
+    void VisitFunctionArg(const SymbolFunctionArg& functionArg) override;
 
 private:
     bool HasBeenVisited(const Symbol& symbol);

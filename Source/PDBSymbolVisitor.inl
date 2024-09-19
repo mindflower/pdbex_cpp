@@ -208,6 +208,14 @@ void PDBSymbolVisitor<MEMBER_DEFINITION_TYPE>::VisitUdtFieldBitFieldEnd(const Sy
 }
 
 template <typename MEMBER_DEFINITION_TYPE>
+void PDBSymbolVisitor<MEMBER_DEFINITION_TYPE>::VisitFunctionArg(const SymbolFunctionArg& functionArg)
+{
+    m_memberContextStack.top()->SetMemberName(functionArg.name);
+    assert(functionArg.type);
+    Visit(*functionArg.type);
+}
+
+template <typename MEMBER_DEFINITION_TYPE>
 void PDBSymbolVisitor<MEMBER_DEFINITION_TYPE>::CheckForDataFieldPadding(const SymbolUdtField* udtField)
 {
     UdtFieldContext UdtFieldCtx(udtField);

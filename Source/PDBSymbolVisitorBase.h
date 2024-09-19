@@ -93,8 +93,7 @@ protected:
         const auto& symbolFunction = std::get<SymbolFunction>(symbol.variant);
         for (const auto& argument : symbolFunction.arguments)
         {
-            assert(argument);
-            Visit(*argument);
+            VisitFunctionArg(argument);
         }
 
         if (symbolFunction.returnType)
@@ -105,7 +104,7 @@ protected:
 
     virtual void VisitFunctionArgType(const Symbol& symbol)
     {
-        const auto& symbolFunctionArg = std::get<SymbolFunctionArg>(symbol.variant);
+        const auto& symbolFunctionArg = std::get<SymbolFunctionArgType>(symbol.variant);
 
         assert(symbolFunctionArg.type);
         Visit(*symbolFunctionArg.type);
@@ -154,4 +153,6 @@ protected:
     {
         VisitUdtField(udtField);
     }
+
+    virtual void VisitFunctionArg(const SymbolFunctionArg& functionArg) {}
 };

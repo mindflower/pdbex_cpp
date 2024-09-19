@@ -298,7 +298,7 @@ void SymbolModule::UpdateSymbolMapFromEnumerator(const DiaEnumSymbolsPtr& diaSym
                     {
                         auto newSymbol = std::make_shared<Symbol>();
                         newSymbol->name = GetSymbolName(symbol);
-                        std::get<SymbolFunction>(it->second->variant).arguments.push_back(std::move(newSymbol));
+                        std::get<SymbolFunction>(it->second->variant).arguments.push_back({std::move(newSymbol)});
                     }
                 });
             });
@@ -428,7 +428,7 @@ void SymbolModule::InitSymbol(const DiaSymbolPtr& diaSymbol, const SymbolPtr& sy
         break;
 
     case SymTagFunctionArgType:
-        ProcessSymbolFunctionArg(diaSymbol, symbol);
+        ProcessSymbolFunctionArgType(diaSymbol, symbol);
         break;
 
     case SymTagFunction:
@@ -557,11 +557,11 @@ void SymbolModule::ProcessSymbolFunction(const DiaSymbolPtr& diaSymbol, const Sy
 
     ForEachDiaSymbol(diaSymbolEnumerator, [this, &function](const DiaSymbolPtr& diaSymbol)
     {
-        function.arguments.push_back(GetSymbol(diaSymbol));
+        function.arguments.push_back({GetSymbol(diaSymbol)});
     });
 }
 
-void SymbolModule::ProcessSymbolFunctionArg(const DiaSymbolPtr& diaSymbol, const SymbolPtr& symbol)
+void SymbolModule::ProcessSymbolFunctionArgType(const DiaSymbolPtr& diaSymbol, const SymbolPtr& symbol)
 {
     assert(diaSymbol);
     assert(symbol);
@@ -570,7 +570,7 @@ void SymbolModule::ProcessSymbolFunctionArg(const DiaSymbolPtr& diaSymbol, const
 
     diaSymbol->get_type(&diaArgumentTypeSymbol);
 
-    SymbolFunctionArg funcArg;
+    SymbolFunctionArgType funcArg;
     funcArg.type = GetSymbol(diaArgumentTypeSymbol);
 
     symbol->variant = std::move(funcArg);
@@ -761,7 +761,7 @@ void SymbolModule::ProcessSymbolFunctionEx(const DiaSymbolPtr& diaSymbol, const 
         diaSymbol->get_dataKind(&dataKind);
         if (dataKind == DataIsParam)
         {
-            function.arguments[argIdx++]->name = GetSymbolName(diaSymbol);
+            function.arguments[argIdx++].name = GetSymbolName(diaSymbol);
         }
     });
 }

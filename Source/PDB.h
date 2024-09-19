@@ -56,6 +56,17 @@ struct SymbolArray
     DWORD elementCount = 0;
 };
 
+struct SymbolFunctionArgType
+{
+    SymbolPtr type;
+};
+
+struct SymbolFunctionArg
+{
+    SymbolPtr type;
+    std::string name;
+};
+
 struct SymbolFunction
 {
     SymbolPtr returnType;
@@ -67,14 +78,10 @@ struct SymbolFunction
     bool isConst = false;
     bool isPure = false;
     DWORD access = 0;
-    std::vector<SymbolPtr> arguments;
+    std::vector<SymbolFunctionArg> arguments;
 
 };
 
-struct SymbolFunctionArg
-{
-    SymbolPtr type;
-};
 
 struct SymbolUdtBaseClass
 {
@@ -102,7 +109,7 @@ using SymbolVariant = std::variant<std::monostate,
                                    SymbolPointer,
                                    SymbolArray,
                                    SymbolFunction,
-                                   SymbolFunctionArg,
+                                   SymbolFunctionArgType,
                                    SymbolUdt>;
 
 struct Symbol
@@ -180,7 +187,7 @@ private:
     void ProcessSymbolPointer(const DiaSymbolPtr& DiaSymbol, const SymbolPtr& Symbol);
     void ProcessSymbolArray(const DiaSymbolPtr& DiaSymbol, const SymbolPtr& Symbol);
     void ProcessSymbolFunction(const DiaSymbolPtr& DiaSymbol, const SymbolPtr& Symbol);
-    void ProcessSymbolFunctionArg(const DiaSymbolPtr& DiaSymbol, const SymbolPtr& Symbol);
+    void ProcessSymbolFunctionArgType(const DiaSymbolPtr& DiaSymbol, const SymbolPtr& Symbol);
     void ProcessSymbolUdt(const DiaSymbolPtr& DiaSymbol, const SymbolPtr& Symbol);
     void ProcessSymbolFunctionEx(const DiaSymbolPtr& DiaSymbol, const SymbolPtr& Symbol);
 

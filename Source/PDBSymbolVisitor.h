@@ -28,6 +28,7 @@ protected:
     void VisitUdtField(const SymbolUdtField& udtField) override;
     void VisitUdtFieldEnd(const SymbolUdtField& udtField) override;
     void VisitUdtFieldBitFieldEnd(const SymbolUdtField& udtField) override;
+    void VisitFunctionArg(const SymbolFunctionArg& functionArg) override;
 
 private:
 

@@ -66,6 +66,12 @@ void PDBSymbolSorter::VisitUdtField(const SymbolUdtField& udtField)
     Visit(*udtField.type);
 }
 
+void PDBSymbolSorter::VisitFunctionArg(const SymbolFunctionArg& functionArg)
+{
+    assert(functionArg.type);
+    Visit(*functionArg.type);
+}
+
 bool PDBSymbolSorter::HasBeenVisited(const Symbol& symbol)
 {
     static DWORD UnnamedCounter = 0;

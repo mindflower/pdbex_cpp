@@ -1,6 +1,7 @@
 #include "UdtFieldDefinition.h"
 #include <cassert>
 
+
 void UdtFieldDefinition::VisitBaseType(const Symbol& symbol)
 {
     if (symbol.baseType == btFloat && symbol.size == 10)
@@ -201,30 +202,9 @@ void UdtFieldDefinition::VisitFunctionArgTypeBegin(const Symbol& symbol)
 
 void UdtFieldDefinition::VisitFunctionArgTypeEnd(const Symbol& symbol)
 {
-    std::string argName;
-    if (!symbol.name.empty())
-    {
-        argName = std::string(" ") + symbol.name;
-    }
-
-    if (m_memberName.find('(') == std::string::npos)
-    {
-        m_args.push_back(m_typePrefix + argName);
-        m_typeSuffix = "";
-        m_typePrefix = "";
-    }
-    else
-    {
-        m_typeSuffix = GetPrintableDefinition();
-        m_args.push_back(m_typeSuffix + argName);
-        m_typeSuffix = "";
-        m_typePrefix = "";
-    }
-
-    auto func = m_funcs.top();
-
-    m_memberName = std::move(func.name);
-    //TODO
+    m_args.push_back(GetPrintableDefinition());
+    m_typeSuffix = "";
+    m_typePrefix = "";
 }
 
 void UdtFieldDefinition::SetMemberName(const std::string& memberName)
@@ -234,10 +214,14 @@ void UdtFieldDefinition::SetMemberName(const std::string& memberName)
 
 std::string UdtFieldDefinition::GetPrintableDefinition() const
 {
-    std::string res;
-    if (!m_typePrefix.empty())
+    std::string res = m_typePrefix;
+    if (!m_memberName.empty())
     {
-        res += m_typePrefix + ' ';
+        if (!res.empty())
+        {
+            res += ' ';
+        }
+        res += m_memberName;
     }
-    return res + m_memberName + m_typeSuffix + m_comment;
+    return res + m_typeSuffix + m_comment;
 }
