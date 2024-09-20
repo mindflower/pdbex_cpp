@@ -1,5 +1,6 @@
 #include "UdtFieldDefinition.h"
 #include <cassert>
+#include <map>
 
 
 void UdtFieldDefinition::VisitBaseType(const Symbol& symbol)
@@ -135,12 +136,36 @@ void UdtFieldDefinition::VisitFunctionTypeBegin(const Symbol& symbol)
     m_memberName = "";
 }
 
+namespace
+{
+    std::string callingConventionToString(const CV_call_e callingConvention)
+    {
+        static const std::map<CV_call_e, std::string> convertor = {
+            {CV_CALL_NEAR_C    , "__cdecl" },
+            {CV_CALL_NEAR_FAST , "__fastcall" },
+            {CV_CALL_NEAR_STD  , "__stdcall" },
+            {CV_CALL_NEAR_SYS  , "__syscall" },
+            {CV_CALL_THISCALL  , "__thiscall" },
+            {CV_CALL_CLRCALL   , "__clrcall" },
+        };
+
+        const auto it = convertor.find(callingConvention);
+        if (it != convertor.end())
+        {
+            return it->second;
+        }
+        assert(false);
+        return {};
+    }
+}
+
 void UdtFieldDefinition::VisitFunctionTypeEnd(const Symbol& symbol)
 {
     const auto& symbolFunction = std::get<SymbolFunction>(symbol.variant);
+
     if (symbolFunction.isStatic)
     {
-        m_typePrefix = "static " + m_typePrefix;
+        m_typePrefix = "static " + m_typePrefix + ' ' + callingConventionToString(symbolFunction.callingConvention);
     }
     else if (symbolFunction.isVirtual)
     {

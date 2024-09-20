@@ -669,6 +669,11 @@ void SymbolModule::ProcessSymbolUdt(const DiaSymbolPtr& diaSymbol, const SymbolP
                     memberTypeFunction.returnType = nullptr;
                 }
 
+                if (memberTypeFunction.callingConvention != CV_CALL_THISCALL)
+                {
+                    memberTypeFunction.isStatic = true;
+                }
+
                 if (memberTypeFunction.isOverride && !udt.baseClassFields.empty())
                 {
                     for (const auto& baseClass : udt.baseClassFields)
@@ -703,10 +708,6 @@ void SymbolModule::ProcessSymbolFunctionEx(const DiaSymbolPtr& diaSymbol, const 
     diaSymbol->get_access(&dwAccess);
     function.access = dwAccess;
 
-    BOOL isStatic = FALSE;
-    diaSymbol->get_isStatic(&isStatic);
-    function.isStatic = static_cast<bool>(isStatic);
-
     BOOL isVirtual = FALSE;
     diaSymbol->get_virtual(&isVirtual);
     function.isVirtual = static_cast<bool>(isVirtual);
@@ -726,10 +727,6 @@ void SymbolModule::ProcessSymbolFunctionEx(const DiaSymbolPtr& diaSymbol, const 
         function.virtualOffset = virtualOffset;
     }
 
-    BOOL isConst = FALSE;
-    diaSymbol->get_constType(&isConst);
-    function.isConst = static_cast<bool>(isConst);
-
     BOOL isPure = FALSE;
     if (isVirtual == TRUE)
     {
@@ -739,12 +736,6 @@ void SymbolModule::ProcessSymbolFunctionEx(const DiaSymbolPtr& diaSymbol, const 
 
     DiaSymbolPtr diaArgumentTypeSymbol;
     diaSymbol->get_type(&diaArgumentTypeSymbol);
-
-    const auto name = GetSymbolName(diaSymbol, false);
-    if (name.ends_with("const "))
-    {
-        function.isConst = true;
-    }
 
     ProcessSymbolFunction(diaArgumentTypeSymbol, symbol);
 
@@ -759,9 +750,25 @@ void SymbolModule::ProcessSymbolFunctionEx(const DiaSymbolPtr& diaSymbol, const 
     {
         DWORD dataKind = 0;
         diaSymbol->get_dataKind(&dataKind);
+        auto name = GetSymbolName(diaSymbol);
+        if (name == "this")
+        {
+            // Getting pointer type
+            DiaSymbolPtr diaThisPointerTypeSymbol;
+            diaSymbol->get_type(&diaThisPointerTypeSymbol);
+
+            // Getting this type
+            DiaSymbolPtr diaThisTypeSymbol;
+            diaThisPointerTypeSymbol->get_type(&diaThisTypeSymbol);
+
+            BOOL isConst = FALSE;
+            diaThisTypeSymbol->get_constType(&isConst);
+            function.isConst = static_cast<bool>(isConst);
+        }
+
         if (dataKind == DataIsParam)
         {
-            function.arguments[argIdx++].name = GetSymbolName(diaSymbol);
+            function.arguments[argIdx++].name = std::move(name);
         }
     });
 }
