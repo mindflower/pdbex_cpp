@@ -612,6 +612,14 @@ void SymbolModule::ProcessSymbolUdt(const DiaSymbolPtr& diaSymbol, const SymbolP
 
     ForEachDiaSymbol(diaSymbolEnumerator, [this, &udt, &symbol](const DiaSymbolPtr& diaChildSymbol)
     {
+        BOOL isCompilerGenerated = FALSE;
+        diaChildSymbol->get_compilerGenerated(&isCompilerGenerated);
+        if (isCompilerGenerated == TRUE)
+        {
+            // TODO: resolve this by pdbex input parameter
+            return;
+        }
+
         DWORD symTag = 0;
         diaChildSymbol->get_symTag(&symTag);
 

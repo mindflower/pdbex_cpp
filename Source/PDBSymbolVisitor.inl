@@ -134,15 +134,6 @@ void PDBSymbolVisitor<MEMBER_DEFINITION_TYPE>::VisitEnumField(const SymbolEnumFi
 template <typename MEMBER_DEFINITION_TYPE>
 void PDBSymbolVisitor<MEMBER_DEFINITION_TYPE>::VisitUdtField(const SymbolUdtField& udtField)
 {
-    static const std::set<std::string> IgnoredNames = {"__local_vftable_ctor_closure", "__vecDelDtor"};
-
-    if (udtField.type->tag == SymTagVTable ||
-        udtField.isBaseClass == true ||
-        IgnoredNames.contains(udtField.name))
-    {
-        return;
-    }
-
     BOOL IsBitFieldMember = udtField.bits != 0;
     BOOL IsFirstBitFieldMember = IsBitFieldMember && !m_previousBitFieldField;
 

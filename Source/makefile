@@ -38,6 +38,8 @@ OBJS = \
     $(ODIR)\main.obj    \
     $(ODIR)\PDB.obj        \
     $(ODIR)\PDBExtractor.obj \
+    $(ODIR)\PDBSymbolSorter.obj \
+    $(ODIR)\UdtFieldDefinition.obj \
     $(ODIR)\PDBHeaderReconstructor.obj
 
 
