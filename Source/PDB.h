@@ -32,6 +32,20 @@ struct SymbolUdtField
     SymbolPtr parent;
     DWORD access = 0;
     bool isBaseClass = false;
+
+    //
+    // Tells whether the field takes up space in the layout of its parent.
+    // Nested type declarations, member functions, typedefs and static data
+    // members do not, so they must be left out of the offset/padding and of
+    // the anonymous struct/union detection.
+    //
+    bool OccupiesStorage() const;
+
+    //
+    // Tells whether the field declares a type (a nested struct/class/union or
+    // a nested enum) instead of declaring a member.
+    //
+    bool IsNestedTypeDeclaration() const;
 };
 
 struct SymbolEnum
@@ -189,6 +203,9 @@ private:
     void ProcessSymbolFunction(const DiaSymbolPtr& DiaSymbol, const SymbolPtr& Symbol);
     void ProcessSymbolFunctionArgType(const DiaSymbolPtr& DiaSymbol, const SymbolPtr& Symbol);
     void ProcessSymbolUdt(const DiaSymbolPtr& DiaSymbol, const SymbolPtr& Symbol);
+    void ProcessSymbolVTable(const DiaSymbolPtr& DiaSymbol, const SymbolPtr& Symbol);
+
+    void ResolveNestedTemplateNames();
     void ProcessSymbolFunctionEx(const DiaSymbolPtr& DiaSymbol, const SymbolPtr& Symbol);
 
 private:
@@ -227,6 +244,26 @@ public:
     static const std::string GetBasicTypeString(const Symbol& symbol);
     static const std::string GetUdtKindString(UdtKind kind);
     static bool IsUnnamedSymbol(const Symbol& symbol);
+    static bool IsStandardLibraryName(const std::string& name);
+    static bool IsStandardLibrarySymbol(const Symbol& symbol);
+
+    //
+    // A nested template instantiation is reported by DIA under its decorated
+    // name, "?$InnerT@H" for InnerT<int>.
+    //
+    static bool IsDecoratedTemplateName(const std::string& name);
+
+    //
+    // The template a name instantiates, from either spelling:
+    // "?$InnerT@H" and "InnerT<int>" both give "InnerT".
+    //
+    static std::string GetTemplateBaseName(const std::string& name);
+
+    //
+    // Strips the enclosing scopes from a (possibly template-qualified) name:
+    // "A::B<C::D>::E" -> "E".
+    //
+    static std::string GetUnqualifiedName(const std::string& name);
 
 private:
     std::unique_ptr<SymbolModule> m_impl;

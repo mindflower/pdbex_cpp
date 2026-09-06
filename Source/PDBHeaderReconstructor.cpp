@@ -20,6 +20,7 @@ void PDBHeaderReconstructor::Clear()
 
 	m_anonymousDataTypeCounter = 0;
 	m_paddingMemberCounter = 0;
+	m_memberTypeWasExpanded = false;
 
 	m_correctedSymbolNames.clear();
 	m_visitedSymbols.clear();
@@ -64,11 +65,9 @@ bool PDBHeaderReconstructor::OnEnumType(const Symbol& symbol)
 
 void PDBHeaderReconstructor::OnEnumTypeBegin(const Symbol& symbol)
 {
-	const auto correctedName = GetCorrectedSymbolName(symbol);
-
 	Write("enum");
 
-	Write(" %s", correctedName.c_str());
+	WriteDeclarationName(symbol);
 
 	Write("\n");
 
@@ -133,8 +132,7 @@ void PDBHeaderReconstructor::OnUdtBegin(const Symbol& symbol)
 
 	if (!PDB::IsUnnamedSymbol(symbol))
 	{
-		const auto correctedName = GetCorrectedSymbolName(symbol);
-		Write(" %s", correctedName.c_str());
+		WriteDeclarationName(symbol);
 
 		if (!udt.baseClassFields.empty())
 		{
@@ -196,21 +194,53 @@ void PDBHeaderReconstructor::OnUdtEnd(const Symbol& symbol)
 
 	if (m_depth == 0)
 	{
-		Write(";");
+		Write("; /* size: 0x%04x */\n\n", symbol.size);
 	}
-
-	Write(" /* size: 0x%04x */", symbol.size);
-
-	if (m_depth == 0)
+	else
 	{
-		Write("\n\n");
+		//
+		// The definition was expanded inside another one, so what comes after the
+		// closing brace is not decided here: the member name for an inlined member
+		// type, nothing at all for a nested type declaration.  OnUdtField and
+		// OnNestedTypeEnd finish the line.
+		//
+		m_memberTypeWasExpanded = true;
 	}
+}
+
+bool PDBHeaderReconstructor::OnNestedTypeBegin(const Symbol& symbol)
+{
+	//
+	// An unnamed nested type only exists to give a type to an anonymous member;
+	// it is written where that member is declared, not on its own.
+	//
+	if (PDB::IsUnnamedSymbol(symbol))
+	{
+		return false;
+	}
+
+	MarkAsVisited(symbol);
+	return true;
+}
+
+void PDBHeaderReconstructor::OnNestedTypeEnd(const Symbol& symbol)
+{
+	Write(";");
+
+	if (symbol.tag == SymTagUDT)
+	{
+		Write(" /* size: 0x%04x */", symbol.size);
+	}
+
+	Write("\n");
+
+	m_memberTypeWasExpanded = false;
 }
 
 void PDBHeaderReconstructor::OnUdtFieldBegin(const SymbolUdtField& udtField)
 {
 	assert(udtField.parent);
-	if (std::get<SymbolUdt>(udtField.parent->variant).kind == UdtClass)
+	if (std::get<SymbolUdt>(udtField.parent->variant).kind == UdtClass && udtField.access != 0)
 	{
 		auto& prevAccess = m_accessStack.top();
 		if (prevAccess != udtField.access)
@@ -227,6 +257,13 @@ void PDBHeaderReconstructor::OnUdtFieldBegin(const SymbolUdtField& udtField)
 			{
 				Write("\n");
 			}
+
+			//
+			// The label belongs to the definition holding the member, so it sits one
+			// level out from the members it introduces.
+			//
+			WriteIndent(m_depth - 1);
+
 			Write(access.c_str());
 			prevAccess = udtField.access;
 		}
@@ -234,16 +271,20 @@ void PDBHeaderReconstructor::OnUdtFieldBegin(const SymbolUdtField& udtField)
 
 	WriteIndent();
 	assert(udtField.type);
-	if (udtField.dataKind != DataIsStaticMember &&
-        udtField.type->tag != SymTagFunction &&
-	    udtField.type->tag != SymTagTypedef &&
-        (udtField.type->tag != SymTagEnum || udtField.tag != SymTagEnum) &&
-	    (udtField.type->tag != SymTagUDT ||
-        (udtField.tag != SymTagUDT && ShouldExpand(*udtField.type) == false)))
+
+	//
+	// Only a field that takes up space in the parent has an offset worth showing,
+	// and a member whose type is expanded in place gets its offsets from the
+	// members of that expansion instead.
+	//
+	const bool isExpandedInPlace = udtField.type->tag == SymTagUDT && ShouldExpand(*udtField.type);
+
+	if (udtField.OccupiesStorage() && !isExpandedInPlace)
 	{
 		WriteOffset(udtField, GetParentOffset());
 	}
 
+	m_memberTypeWasExpanded = false;
 	m_offsetStack.push_back(udtField.offset);
 }
 
@@ -259,18 +300,14 @@ void PDBHeaderReconstructor::OnUdtField(const SymbolUdtField& udtField, UdtField
 		Write("static ");
 	}
 
-    if (udtField.tag == SymTagUDT && udtField.type->tag == SymTagUDT)
-    {
-        memberDefinition.SetMemberName("");
-        Write(PDB::GetUdtKindString(std::get<SymbolUdt>(udtField.type->variant).kind).c_str());
-        Write(" ");
-    }
-
-    if (udtField.tag == SymTagEnum && udtField.type->tag == SymTagEnum)
-    {
-        memberDefinition.SetMemberName("");
-        Write("enum ");
-    }
+	if (m_memberTypeWasExpanded)
+	{
+		//
+		// The closing brace of the definition written in place is already on this
+		// line, so the member name needs to be separated from it.
+		//
+		Write(" ");
+	}
 
 	Write("%s", memberDefinition.GetPrintableDefinition().c_str());
 
@@ -280,6 +317,16 @@ void PDBHeaderReconstructor::OnUdtField(const SymbolUdtField& udtField, UdtField
 	}
 
 	Write(";");
+
+	if (m_memberTypeWasExpanded)
+	{
+		//
+		// The member name closed a definition written in place, so the size of that
+		// definition still has to be reported.
+		//
+		Write(" /* size: 0x%04x */", udtField.type->size);
+		m_memberTypeWasExpanded = false;
+	}
 
 	if (udtField.bits != 0)
 	{
@@ -425,10 +472,28 @@ void PDBHeaderReconstructor::Write(const char* Format, ...)
 
 void PDBHeaderReconstructor::WriteIndent()
 {
-	for (DWORD i = 0; i < m_depth; ++i)
+	WriteIndent(m_depth);
+}
+
+void PDBHeaderReconstructor::WriteIndent(DWORD depth)
+{
+	for (DWORD i = 0; i < depth; ++i)
 	{
-		Write("  ");
+		Write("    ");
 	}
+}
+
+void PDBHeaderReconstructor::WriteDeclarationName(const Symbol& symbol)
+{
+	const auto& correctedName = GetCorrectedSymbolName(symbol);
+
+	//
+	// A type nested in another one is declared with its own name: the qualified
+	// name DIA reports ("Outer::Inner") is not a valid declarator inside Outer.
+	//
+	Write(" %s", m_depth == 0
+		? correctedName.c_str()
+		: PDB::GetUnqualifiedName(correctedName).c_str());
 }
 
 void PDBHeaderReconstructor::WriteVariant(const VARIANT& v)

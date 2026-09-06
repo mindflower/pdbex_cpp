@@ -7,6 +7,7 @@
 #include <iostream>
 #include <fstream>
 #include <stdexcept>
+#include <set>
 
 namespace
 {
@@ -50,7 +51,7 @@ void PDBExtractor::PrintUsage()
 	std::cout << ("\n");
 	std::cout << ("pdbex <path> [-o <filename>] [-e <type>]\n");
 	std::cout << ("                     [-u <prefix>] [-s prefix] [-r prefix] [-g suffix]\n");
-	std::cout << ("                     [-p] [-x] [-b] [-d]\n");
+	std::cout << ("                     [-p] [-x] [-b] [-d] [-l]\n");
 	std::cout << ("\n");
 	std::cout << ("<path>               Path to the PDB file.\n");
 	std::cout << (" -o filename         Specifies the output file.                       (stdout)\n");
@@ -69,6 +70,9 @@ void PDBExtractor::PrintUsage()
 	std::cout << (" -x                  Show offsets.                                    (T)\n");
 	std::cout << (" -b                  Allow bitfields in union.                        (F)\n");
 	std::cout << (" -d                  Allow unnamed data types.                        (T)\n");
+	std::cout << (" -l                  Print standard library and CRT symbols.          (T)\n");
+	std::cout << ("                       Use -l- to leave out everything that belongs\n");
+	std::cout << ("                       to the C++ standard library or to the C runtime.\n");
 	std::cout << ("\n");
 }
 
@@ -89,7 +93,7 @@ void PDBExtractor::ParseParameters(int argc, char** argv)
 	while (++argumentPointer < argc)
 	{
 		const std::string currentArgument = argv[argumentPointer];
-		const std::string nextArgument = argumentPointer < argc ? argv[argumentPointer + 1] : std::string{};
+		const std::string nextArgument = argumentPointer + 1 < argc ? argv[argumentPointer + 1] : std::string{};
 
 		if ((currentArgument.size() != 2 && currentArgument.size() != 3) ||
 		    (currentArgument.size() == 2 && currentArgument[0] != '-') ||
@@ -201,6 +205,10 @@ void PDBExtractor::ParseParameters(int argc, char** argv)
 			m_settings.pdbHeaderReconstructorSettings.allowAnonymousDataTypes = !offSwitch;
 			break;
 
+		case 'l':
+			m_settings.printStandardLibrary = !offSwitch;
+			break;
+
 		default:
 			throw PDBDumperException(MESSAGE_INVALID_PARAMETERS);
 		}
@@ -219,9 +227,72 @@ void PDBExtractor::OpenPDBFile()
 	}
 }
 
+bool PDBExtractor::ShouldPrintSymbol(const Symbol& symbol) const
+{
+	return m_settings.printStandardLibrary || !PDB::IsStandardLibrarySymbol(symbol);
+}
+
+//
+// Collects the names of the types that are declared inside one of the given
+// types.  Those are written as part of their enclosing definition, so writing
+// them at file scope as well would define them twice - and under a qualified
+// name that cannot be declared there in the first place.
+//
+// The key is the name rather than the symbol index because DIA hands out a
+// separate symbol for a nested type depending on whether it is reached through
+// the global scope or through its parent.
+//
+// Enclosing types that are not printed themselves count too: a type declared
+// inside another one is not a file scope type, so on its own it would be a
+// definition nothing can refer to.
+//
+std::set<std::string> PDBExtractor::CollectNestedTypeNames(const std::vector<DWORD>& symbolIndexes)
+{
+	std::set<std::string> nestedTypeNames;
+
+	for (const auto& symIndex : symbolIndexes)
+	{
+		const auto symbol = m_pdb.GetSymbolBySymbolIndex(symIndex);
+		if (!symbol || symbol->tag != SymTagUDT)
+		{
+			continue;
+		}
+
+		for (const auto& field : std::get<SymbolUdt>(symbol->variant).fields)
+		{
+			//
+			// An unnamed nested type is not written by its enclosing definition but by
+			// the member that uses it, so it is not covered here.
+			//
+			if (!field.IsNestedTypeDeclaration() || PDB::IsUnnamedSymbol(*field.type))
+			{
+				continue;
+			}
+
+			//
+			// Reached through its parent a nested type is named on its own, while the
+			// global scope lists it a second time under its qualified name.  Both
+			// spellings have to be turned away.
+			//
+			const std::string& nestedName = field.type->name;
+			nestedTypeNames.insert(nestedName);
+
+			if (!symbol->name.empty() && PDB::GetUnqualifiedName(nestedName) == nestedName)
+			{
+				nestedTypeNames.insert(symbol->name + "::" + nestedName);
+			}
+		}
+	}
+
+	return nestedTypeNames;
+}
+
 void PDBExtractor::PrintPDBDefinitions()
 {
-	for (const auto& symIndex : m_symbolSorter->GetSortedSymbolIndexes())
+	const auto& sortedSymbolIndexes = m_symbolSorter->GetSortedSymbolIndexes();
+	const auto nestedTypeNames = CollectNestedTypeNames(sortedSymbolIndexes);
+
+	for (const auto& symIndex : sortedSymbolIndexes)
 	{
 		bool expand = true;
 
@@ -232,6 +303,12 @@ void PDBExtractor::PrintPDBDefinitions()
 		    PDBHeaderReconstructor::MemberStructExpansionType::InlineUnnamed &&
 		    symbol->tag == SymTagUDT &&
 		    PDB::IsUnnamedSymbol(*symbol))
+		{
+			expand = false;
+		}
+
+		if (!ShouldPrintSymbol(*symbol) ||
+		    nestedTypeNames.find(symbol->name) != nestedTypeNames.end())
 		{
 			expand = false;
 		}
@@ -249,6 +326,11 @@ void PDBExtractor::PrintPDBFunctions()
 
 	for (const auto& func : m_pdb.GetFunctionSet())
 	{
+		if (!m_settings.printStandardLibrary && PDB::IsStandardLibraryName(func))
+		{
+			continue;
+		}
+
 		m_settings.pdbHeaderReconstructorSettings.output.get() << func << std::endl;
 	}
 

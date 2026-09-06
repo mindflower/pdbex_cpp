@@ -348,6 +348,208 @@ void SymbolModule::BuildSymbolMap()
     {
         UpdateSymbolMapFromEnumerator(diaSymbolEnumerator);
     }
+
+    ResolveNestedTemplateNames();
+}
+
+namespace
+{
+    //
+    // MSVC's codes for the builtin types, as they turn up in the argument list
+    // of a decorated template name.  The longer codes come first so that "_J"
+    // is not read as "_" followed by "J".
+    //
+    struct MangledBuiltinType
+    {
+        const char* code;
+        const char* type;
+    };
+
+    const MangledBuiltinType MangledBuiltinTypes[] = {
+        { "_N", "bool"             },
+        { "_W", "wchar_t"          },
+        { "_Q", "char8_t"          },
+        { "_S", "char16_t"         },
+        { "_U", "char32_t"         },
+        { "_J", "__int64"          },
+        { "_K", "unsigned __int64" },
+        { "D",  "char"             },
+        { "E",  "unsigned char"    },
+        { "F",  "short"            },
+        { "G",  "unsigned short"   },
+        { "H",  "int"              },
+        { "I",  "unsigned int"     },
+        { "J",  "long"             },
+        { "K",  "unsigned long"    },
+        { "M",  "float"            },
+        { "N",  "double"           },
+        { "O",  "long double"      },
+        { "X",  "void"             },
+    };
+
+    //
+    // Spells out the arguments of a decorated template name as long as every
+    // one of them is a builtin type: "?$Same@H" gives "int".  Class arguments,
+    // non-type arguments and pointers need a full MSVC demangler, so they give
+    // nothing back and the caller falls back on another way of telling the
+    // instantiations apart.
+    //
+    std::string DecodeTemplateArguments(const std::string& name)
+    {
+        const auto argumentsStart = name.find('@', 2);
+        if (!PDB::IsDecoratedTemplateName(name) || argumentsStart == std::string::npos)
+        {
+            return {};
+        }
+
+        std::string arguments;
+
+        for (size_t i = argumentsStart + 1; i < name.size() && name[i] != '@'; )
+        {
+            const MangledBuiltinType* decoded = nullptr;
+
+            for (const auto& builtin : MangledBuiltinTypes)
+            {
+                const auto codeLength = strlen(builtin.code);
+                if (name.compare(i, codeLength, builtin.code) == 0)
+                {
+                    decoded = &builtin;
+                    i += codeLength;
+                    break;
+                }
+            }
+
+            if (decoded == nullptr)
+            {
+                return {};
+            }
+
+            if (!arguments.empty())
+            {
+                arguments += ",";
+            }
+
+            arguments += decoded->type;
+        }
+
+        return arguments;
+    }
+}
+
+void SymbolModule::ResolveNestedTemplateNames()
+{
+    //
+    // Reached through its parent, a nested template instantiation carries the
+    // decorated name "?$InnerT@H", and DIA refuses to undecorate it.  The same
+    // type is listed at global scope under the readable qualified name
+    // "OuterT<float>::InnerT<int>", so the readable one is looked up there and
+    // put back on the nested symbol.
+    //
+    // Candidates are grouped by the scope they live in together with the
+    // template they instantiate, which is all the decorated name gives away.
+    //
+    std::unordered_map<std::string, std::vector<SymbolPtr>> candidatesByScope;
+
+    for (const auto&[name, symbol] : m_symbolNameMap)
+    {
+        if (!symbol || (symbol->tag != SymTagUDT && symbol->tag != SymTagEnum))
+        {
+            continue;
+        }
+
+        const std::string unqualifiedName = PDB::GetUnqualifiedName(name);
+        if (unqualifiedName.size() == name.size())
+        {
+            continue;
+        }
+
+        const std::string scope = name.substr(0, name.size() - unqualifiedName.size() - 2);
+        candidatesByScope[scope + "::" + PDB::GetTemplateBaseName(unqualifiedName)].push_back(symbol);
+    }
+
+    //
+    // A nested template can hold nested templates of its own, and looking those
+    // up needs the enclosing name to be readable already, so the pass repeats
+    // until it stops finding anything.
+    //
+    for (bool resolvedAny = true; resolvedAny; )
+    {
+        resolvedAny = false;
+
+        for (const auto&[_, symbol] : m_symbolMap)
+        {
+            if (!symbol || symbol->name.empty() || !std::holds_alternative<SymbolUdt>(symbol->variant))
+            {
+                continue;
+            }
+
+            for (auto& field : std::get<SymbolUdt>(symbol->variant).fields)
+            {
+                if (!field.IsNestedTypeDeclaration() ||
+                    !PDB::IsDecoratedTemplateName(field.type->name))
+                {
+                    continue;
+                }
+
+                const std::string templateName =
+                    symbol->name + "::" + PDB::GetTemplateBaseName(field.type->name);
+
+                const auto candidates = candidatesByScope.find(templateName);
+                if (candidates == candidatesByScope.end())
+                {
+                    continue;
+                }
+
+                //
+                // Where the decorated arguments can be read, they name the
+                // instantiation outright; the name is still only accepted if a
+                // symbol really goes by it, so a misread cannot invent one.
+                // Otherwise the size has to tell the instantiations apart, and
+                // if even that does not single one out the decorated name stays:
+                // a wrong name would be worse than an unreadable one.
+                //
+                const std::string decodedArguments = DecodeTemplateArguments(field.type->name);
+                const std::string decodedName = decodedArguments.empty()
+                    ? std::string{}
+                    : templateName + "<" + decodedArguments + ">";
+
+                const Symbol* match = nullptr;
+                bool ambiguous = false;
+
+                for (const auto& candidate : candidates->second)
+                {
+                    if (candidate->tag != field.type->tag || candidate->size != field.type->size)
+                    {
+                        continue;
+                    }
+
+                    if (!decodedName.empty() && candidate->name == decodedName)
+                    {
+                        match = candidate.get();
+                        ambiguous = false;
+                        break;
+                    }
+
+                    if (match != nullptr)
+                    {
+                        ambiguous = true;
+                        continue;
+                    }
+
+                    match = candidate.get();
+                }
+
+                if (match == nullptr || ambiguous)
+                {
+                    continue;
+                }
+
+                field.type->name = match->name;
+                field.name = match->name;
+                resolvedAny = true;
+            }
+        }
+    }
 }
 
 const SymbolMap& SymbolModule::GetSymbolMap() const
@@ -435,6 +637,10 @@ void SymbolModule::InitSymbol(const DiaSymbolPtr& diaSymbol, const SymbolPtr& sy
         ProcessSymbolFunctionEx(diaSymbol, symbol);
         break;
 
+    case SymTagVTable:
+        ProcessSymbolVTable(diaSymbol, symbol);
+        break;
+
     default:
         break;
     }
@@ -442,6 +648,21 @@ void SymbolModule::InitSymbol(const DiaSymbolPtr& diaSymbol, const SymbolPtr& sy
 
 void SymbolModule::ProcessSymbolBase(const DiaSymbolPtr& diaSymbol, const SymbolPtr& symbol)
 {
+}
+
+void SymbolModule::ProcessSymbolVTable(const DiaSymbolPtr& diaSymbol, const SymbolPtr& symbol)
+{
+    assert(symbol);
+
+    //
+    // DIA reports no length for the virtual function table pointer, yet it does
+    // take up one pointer at the front of the layout.  Leaving it at zero makes
+    // every following member look misplaced and produces a bogus padding member.
+    //
+    if (symbol->size == 0)
+    {
+        symbol->size = m_machineType == IMAGE_FILE_MACHINE_I386 ? 4 : 8;
+    }
 }
 
 void SymbolModule::ProcessSymbolEnum(const DiaSymbolPtr& diaSymbol, const SymbolPtr& symbol)
@@ -798,6 +1019,75 @@ namespace
         const char* typeString = nullptr;
     };
 
+    //
+    // Names of the C++ standard library, of the MSVC C runtime and of the types
+    // the compiler itself emits.  These tokens are looked for anywhere in a
+    // symbol name so that templates instantiated over library types
+    // (Foo<std::string>) and nested types (std::vector<int>::iterator) are
+    // recognised as well.  The list is deliberately a heuristic: a PDB does not
+    // record which library a type came from.
+    //
+    const char* const StandardLibraryTokens[] = {
+        "std::",
+        "stdext::",
+        "Concurrency::",
+        "__std_",
+        "__vc_attributes",
+        "__crt",
+        "__acrt",
+        "__vcrt",
+        "__scrt",
+        "_CRT",
+        "_Crt",
+        "_crt_",
+        "__FrameHandler",
+        "FH4::",
+        "_LocaleUpdate",
+        "_Locinfo",
+        "_Lockit",
+        "_Iosb",
+        "_Yarn",
+        "type_info",
+    };
+
+    //
+    // Runtime types that live in the global namespace and therefore have to be
+    // matched from the beginning of the name.
+    //
+    const char* const StandardLibraryPrefixes[] = {
+        "_s_",                  // exception handling tables: _s_FuncInfo, ...
+        "_s__",                 // RTTI tables: _s__RTTIBaseClassDescriptor, ...
+        "_TypeDescriptor",
+        "__non_rtti_object",
+        "__ArrayUnwind",
+        "_PMD",
+        "_ThrowInfo",
+        "_CatchableType",
+        "_UnwindMapEntry",
+        "_TryBlockMapEntry",
+        "_HandlerType",
+        "_ESTypeList",
+        "_FuncInfo",
+        "_IPtoStateMap",
+        "_onexit_table_t",
+        "_iobuf",
+        "_ptiddata",
+        "_locale",
+        "_setloc_struct",
+        "localeinfo_struct",
+        "threadlocaleinfostruct",
+        "threadmbcinfostruct",
+        "__lc_time_data",
+        "lconv",
+        "tagLC_ID",
+        "_Mbstatet",
+        "_Timevec",
+        "_Ctypevec",
+        "_Collvec",
+        "_Cvtvec",
+        "_Dconst",
+    };
+
     BasicTypeMapElement BasicTypeMapMSVC[] = {
         { btNoType,       0,  "btNoType",         "..."              }, //nullptr
         { btVoid,         0,  "btVoid",           "void"             },
@@ -948,14 +1238,132 @@ bool PDB::IsUnnamedSymbol(const Symbol& symbol)
            strstr(symbol.name.c_str(), "__unnamed") != nullptr;
 }
 
+bool PDB::IsDecoratedTemplateName(const std::string& name)
+{
+    return name.compare(0, 2, "?$") == 0;
+}
+
+std::string PDB::GetTemplateBaseName(const std::string& name)
+{
+    if (IsDecoratedTemplateName(name))
+    {
+        const auto argumentsStart = name.find('@', 2);
+        return name.substr(2, argumentsStart == std::string::npos
+            ? std::string::npos
+            : argumentsStart - 2);
+    }
+
+    const auto argumentsStart = name.find('<');
+    return argumentsStart == std::string::npos ? name : name.substr(0, argumentsStart);
+}
+
+bool PDB::IsStandardLibraryName(const std::string& name)
+{
+    for (const auto* token : StandardLibraryTokens)
+    {
+        if (name.find(token) != std::string::npos)
+        {
+            return true;
+        }
+    }
+
+    //
+    // The compiler decorates some runtime records it grows by hand, for example
+    // "$_s__RTTIBaseClassArray$_extraBytes_16"; the type they are built from
+    // follows the leading '$'.
+    //
+    const char* bareName = name.c_str();
+    if (*bareName == '$')
+    {
+        ++bareName;
+    }
+
+    for (const auto* prefix : StandardLibraryPrefixes)
+    {
+        if (strncmp(bareName, prefix, strlen(prefix)) == 0)
+        {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+bool PDB::IsStandardLibrarySymbol(const Symbol& symbol)
+{
+    return IsStandardLibraryName(symbol.name);
+}
+
+std::string PDB::GetUnqualifiedName(const std::string& name)
+{
+    //
+    // Only the '::' that separate the enclosing scopes count; the ones that
+    // appear inside template arguments belong to the name itself.
+    //
+    int templateDepth = 0;
+    size_t lastScope = std::string::npos;
+
+    for (size_t i = 0; i < name.size(); ++i)
+    {
+        switch (name[i])
+        {
+        case '<':
+            ++templateDepth;
+            break;
+
+        case '>':
+            --templateDepth;
+            break;
+
+        case ':':
+            if (templateDepth == 0 && i + 1 < name.size() && name[i + 1] == ':')
+            {
+                lastScope = i;
+                ++i;
+            }
+            break;
+
+        default:
+            break;
+        }
+    }
+
+    return lastScope == std::string::npos ? name : name.substr(lastScope + 2);
+}
+
+bool SymbolUdtField::OccupiesStorage() const
+{
+    switch (tag)
+    {
+    case SymTagData:
+        return dataKind != DataIsStaticMember;
+
+    case SymTagBaseClass:
+    case SymTagVTable:
+        return true;
+
+    default:
+        return false;
+    }
+}
+
+bool SymbolUdtField::IsNestedTypeDeclaration() const
+{
+    return (tag == SymTagUDT || tag == SymTagEnum) && type != nullptr;
+}
+
 const SymbolUdtField* SymbolUdt::FieldFirst() const
 {
-    return &fields.at(0);
+    return fields.data();
 }
 
 const SymbolUdtField* SymbolUdt::FieldLast() const
 {
-    return &fields[fields.size() - 1];
+    //
+    // One past the last field, so that the last field itself still takes part
+    // in the look-ahead the anonymous struct/union detection relies on.
+    //
+    return fields.data() + fields.size();
 }
 
 const SymbolUdtField* SymbolUdt::FieldNext(const SymbolUdtField* Field) const
@@ -965,8 +1373,11 @@ const SymbolUdtField* SymbolUdt::FieldNext(const SymbolUdtField* Field) const
 
 const SymbolUdtField* SymbolUdt::FindFieldNext(const SymbolUdtField* Field) const
 {
-    while ((Field = FieldNext(Field)) != FieldLast()
-           && (Field->tag != SymTagData)
-           && (Field->dataKind == DataIsStaticMember));
+    //
+    // Look-ahead is about the layout, so everything that does not take up space
+    // (nested types, member functions, typedefs, static data members) is passed
+    // over.
+    //
+    while ((Field = FieldNext(Field)) != FieldLast() && !Field->OccupiesStorage());
     return Field;
 }

@@ -15,6 +15,14 @@ public:
     virtual	void OnUdtBegin(const Symbol& symbol) {}
     virtual	void OnUdtEnd(const Symbol& symbol) {}
 
+    //
+    // A type declared inside another type.  OnNestedTypeBegin tells whether the
+    // declaration has to be written out at all; unnamed nested types are
+    // written by the member that uses them instead.
+    //
+    virtual	bool OnNestedTypeBegin(const Symbol& symbol) { return false; }
+    virtual	void OnNestedTypeEnd(const Symbol& symbol) {}
+
     virtual	void OnUdtFieldBegin(const SymbolUdtField& udtField) {}
     virtual	void OnUdtFieldEnd(const SymbolUdtField& udtField) {}
     virtual void OnUdtField(const SymbolUdtField& udtField, UdtFieldDefinitionBase& memberDefinition) {}

@@ -13,6 +13,13 @@ public:
 
         std::filesystem::path pdbPath;
         std::filesystem::path outputFilename;
+
+        //
+        // Whether types and functions of the C++ standard library and of the C
+        // runtime are written out.  They usually make up most of a PDB and are
+        // rarely what the caller is after.
+        //
+        bool printStandardLibrary = false;
     };
 
     int Run(int argc, char** argv);
@@ -24,6 +31,9 @@ private:
     void PrintPDBDefinitions();
     void PrintPDBFunctions();
     void DumpAllSymbols();
+
+    bool ShouldPrintSymbol(const Symbol& symbol) const;
+    std::set<std::string> CollectNestedTypeNames(const std::vector<DWORD>& symbolIndexes);
 
 private:
     PDB m_pdb;

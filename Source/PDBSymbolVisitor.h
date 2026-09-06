@@ -62,14 +62,12 @@ private:
     {
         UdtFieldContext(const SymbolUdtField* udtField, BOOL respectBitFields = TRUE);
 
-        bool IsFirst() const;
         bool IsLast() const;
 
         bool GetNext();
 
         const SymbolUdtField* udtField;
 
-        const SymbolUdtField* previousUdtField;
         const SymbolUdtField* currentUdtField;
         const SymbolUdtField* nextUdtField;
 
@@ -80,6 +78,9 @@ private:
     using ContextStack = std::stack<std::shared_ptr<UdtFieldDefinitionBase>>;
 
 private:
+    void ExpandUdt(const Symbol& symbol);
+    void VisitNestedTypeDeclaration(const SymbolUdtField& udtField);
+
     void CheckForDataFieldPadding(const SymbolUdtField* udtField);
     void CheckForBitFieldFieldPadding(const SymbolUdtField* udtField);
     void CheckForAnonymousUnion(const SymbolUdtField* udtField);

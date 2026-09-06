@@ -93,30 +93,81 @@ void PDBSymbolVisitor<MEMBER_DEFINITION_TYPE>::VisitUdt(const Symbol& symbol)
     {
         m_memberContextStack.top()->VisitUdtType(symbol);
     }
-    else if (m_reconstructVisitor->OnUdt(symbol))
+    else if (m_reconstructVisitor->OnUdt(symbol) && symbol.size > 0)
     {
-        if (symbol.size > 0)
-        {
-            AnonymousUdtStack AnonymousUDTStackBackup;
-            AnonymousUdtStack AnonymousUnionStackBackup;
-            AnonymousUdtStack AnonymousStructStackBackup;
-            m_anonymousUdtStack.swap(AnonymousUDTStackBackup);
-            m_anonymousUnionStack.swap(AnonymousUnionStackBackup);
-            m_anonymousStructStack.swap(AnonymousStructStackBackup);
-            {
-                m_memberContextStack.push(MemberDefinitionFactory());
-
-                m_reconstructVisitor->OnUdtBegin(symbol);
-                PDBSymbolVisitorBase::VisitUdt(symbol);
-                m_reconstructVisitor->OnUdtEnd(symbol);
-
-                m_memberContextStack.pop();
-            }
-            m_anonymousStructStack.swap(AnonymousStructStackBackup);
-            m_anonymousUnionStack.swap(AnonymousUnionStackBackup);
-            m_anonymousUdtStack.swap(AnonymousUDTStackBackup);
-        }
+        ExpandUdt(symbol);
     }
+}
+
+//
+// Writes the body of a definition.  Everything the field walk keeps track of
+// belongs to a single definition, so the state of the enclosing one is put
+// aside for the duration and restored afterwards.
+//
+template <typename MEMBER_DEFINITION_TYPE>
+void PDBSymbolVisitor<MEMBER_DEFINITION_TYPE>::ExpandUdt(const Symbol& symbol)
+{
+    AnonymousUdtStack anonymousUdtStackBackup;
+    AnonymousUdtStack anonymousUnionStackBackup;
+    AnonymousUdtStack anonymousStructStackBackup;
+    m_anonymousUdtStack.swap(anonymousUdtStackBackup);
+    m_anonymousUnionStack.swap(anonymousUnionStackBackup);
+    m_anonymousStructStack.swap(anonymousStructStackBackup);
+
+    const SymbolUdtField* previousUdtFieldBackup = m_previousUdtField;
+    const SymbolUdtField* previousBitFieldFieldBackup = m_previousBitFieldField;
+    const DWORD sizeOfPreviousUdtFieldBackup = m_sizeOfPreviousUdtField;
+    m_previousUdtField = nullptr;
+    m_previousBitFieldField = nullptr;
+    m_sizeOfPreviousUdtField = 0;
+
+    m_memberContextStack.push(MemberDefinitionFactory());
+
+    m_reconstructVisitor->OnUdtBegin(symbol);
+    PDBSymbolVisitorBase::VisitUdt(symbol);
+    m_reconstructVisitor->OnUdtEnd(symbol);
+
+    m_memberContextStack.pop();
+
+    m_sizeOfPreviousUdtField = sizeOfPreviousUdtFieldBackup;
+    m_previousBitFieldField = previousBitFieldFieldBackup;
+    m_previousUdtField = previousUdtFieldBackup;
+
+    m_anonymousStructStack.swap(anonymousStructStackBackup);
+    m_anonymousUnionStack.swap(anonymousUnionStackBackup);
+    m_anonymousUdtStack.swap(anonymousUdtStackBackup);
+}
+
+//
+// A struct, class, union or enum declared inside another type.  It belongs to
+// the enclosing definition rather than being one of its members, so it is
+// written out in full whatever the member expansion setting says.
+//
+template <typename MEMBER_DEFINITION_TYPE>
+void PDBSymbolVisitor<MEMBER_DEFINITION_TYPE>::VisitNestedTypeDeclaration(const SymbolUdtField& udtField)
+{
+    const Symbol& nestedType = *udtField.type;
+
+    if (!m_reconstructVisitor->OnNestedTypeBegin(nestedType))
+    {
+        return;
+    }
+
+    m_reconstructVisitor->OnUdtFieldBegin(udtField);
+
+    if (nestedType.tag == SymTagEnum)
+    {
+        m_reconstructVisitor->OnEnumTypeBegin(nestedType);
+        PDBSymbolVisitorBase::VisitEnumType(nestedType);
+        m_reconstructVisitor->OnEnumTypeEnd(nestedType);
+    }
+    else
+    {
+        ExpandUdt(nestedType);
+    }
+
+    m_reconstructVisitor->OnNestedTypeEnd(nestedType);
+    m_reconstructVisitor->OnUdtFieldEnd(udtField);
 }
 
 template <typename MEMBER_DEFINITION_TYPE>
@@ -134,13 +185,34 @@ void PDBSymbolVisitor<MEMBER_DEFINITION_TYPE>::VisitEnumField(const SymbolEnumFi
 template <typename MEMBER_DEFINITION_TYPE>
 void PDBSymbolVisitor<MEMBER_DEFINITION_TYPE>::VisitUdtField(const SymbolUdtField& udtField)
 {
+    //
+    // The base class subobject is already spelled out by the base clause of the
+    // definition; writing it again would declare the parent as a member of its
+    // own child.
+    //
+    // The virtual function table pointer is implied by the virtual members that
+    // put it there, so it is left out as well.  Both still take part in the
+    // layout bookkeeping done by VisitUdtFieldEnd, which is what keeps the
+    // offsets and the padding of the members after them right.
+    //
+    if (udtField.isBaseClass || udtField.tag == SymTagVTable)
+    {
+        return;
+    }
+
+    if (udtField.IsNestedTypeDeclaration())
+    {
+        VisitNestedTypeDeclaration(udtField);
+        return;
+    }
+
     BOOL IsBitFieldMember = udtField.bits != 0;
     BOOL IsFirstBitFieldMember = IsBitFieldMember && !m_previousBitFieldField;
 
     m_memberContextStack.push(MemberDefinitionFactory());
     m_memberContextStack.top()->SetMemberName(udtField.name);
 
-    if (!IsBitFieldMember || IsFirstBitFieldMember)
+    if (udtField.OccupiesStorage() && (!IsBitFieldMember || IsFirstBitFieldMember))
     {
         CheckForDataFieldPadding(&udtField);
         CheckForAnonymousUnion(&udtField);
@@ -209,11 +281,9 @@ void PDBSymbolVisitor<MEMBER_DEFINITION_TYPE>::VisitFunctionArg(const SymbolFunc
 template <typename MEMBER_DEFINITION_TYPE>
 void PDBSymbolVisitor<MEMBER_DEFINITION_TYPE>::CheckForDataFieldPadding(const SymbolUdtField* udtField)
 {
-    UdtFieldContext UdtFieldCtx(udtField);
     DWORD PreviousUdtFieldOffset = 0;
     DWORD SizeOfPreviousUdtField = 0;
     DWORD BaseClassOffset = 0;
-    bool IsPreviousTypedef = false;
 
     const auto& BaseClassFields = std::get<SymbolUdt>(udtField->parent->variant).baseClassFields;
     for (const auto& Field : BaseClassFields)
@@ -221,15 +291,18 @@ void PDBSymbolVisitor<MEMBER_DEFINITION_TYPE>::CheckForDataFieldPadding(const Sy
         BaseClassOffset += Field.type->size;
     }
 
-    if (UdtFieldCtx.IsFirst() == false)
+    //
+    // m_previousUdtField is null while the first field that takes up space is
+    // being written, which is also the only moment where there is nothing to
+    // pad from.
+    //
+    if (m_previousUdtField != nullptr)
     {
         PreviousUdtFieldOffset = m_previousUdtField->offset;
         SizeOfPreviousUdtField = m_sizeOfPreviousUdtField;
-        IsPreviousTypedef = m_previousUdtField->tag == SymTagTypedef;
     }
 
-    if (!IsPreviousTypedef &&
-        BaseClassOffset < udtField->offset &&
+    if (BaseClassOffset < udtField->offset &&
         PreviousUdtFieldOffset + SizeOfPreviousUdtField < udtField->offset)
     {
         DWORD Difference = udtField->offset - (PreviousUdtFieldOffset + SizeOfPreviousUdtField);
@@ -334,16 +407,21 @@ void PDBSymbolVisitor<MEMBER_DEFINITION_TYPE>::CheckForAnonymousStruct(const Sym
 template <typename MEMBER_DEFINITION_TYPE>
 void PDBSymbolVisitor<MEMBER_DEFINITION_TYPE>::CheckForEndOfAnonymousUdt(const SymbolUdtField* udtField)
 {
-    m_previousUdtField = ((udtField->tag == SymTagData
-                           || udtField->tag == SymTagBaseClass
-                           || udtField->tag == SymTagTypedef
-                           ) && udtField->dataKind != DataIsStaticMember)
-        ? udtField : m_previousUdtField;
-    m_sizeOfPreviousUdtField = ((udtField->tag == SymTagData
-                                 || udtField->tag == SymTagBaseClass
-                                 || udtField->tag == SymTagTypedef
-                                 ) && udtField->dataKind != DataIsStaticMember)
-        ? udtField->type->size : m_sizeOfPreviousUdtField;
+    if (!udtField->OccupiesStorage())
+    {
+        //
+        // A field that takes up no space cannot move the layout on, so it
+        // neither closes an anonymous struct/union nor becomes the field the
+        // next padding is measured from.
+        //
+        return;
+    }
+
+    if (udtField->type)
+    {
+        m_previousUdtField = udtField;
+        m_sizeOfPreviousUdtField = udtField->type->size;
+    }
 
     if (m_anonymousUdtStack.empty())
         return;
@@ -502,7 +580,6 @@ PDBSymbolVisitor<MEMBER_DEFINITION_TYPE>::UdtFieldContext::UdtFieldContext(const
 {
     this->udtField = udtField;
 
-    previousUdtField = &udtField[-1];
     currentUdtField = &udtField[0];
     nextUdtField = std::get<SymbolUdt>(udtField->parent->variant).FindFieldNext(udtField);
 
@@ -515,12 +592,6 @@ PDBSymbolVisitor<MEMBER_DEFINITION_TYPE>::UdtFieldContext::UdtFieldContext(const
 }
 
 template<typename MEMBER_DEFINITION_TYPE>
-bool PDBSymbolVisitor<MEMBER_DEFINITION_TYPE>::UdtFieldContext::IsFirst() const
-{
-    return previousUdtField < std::get<SymbolUdt>(udtField->parent->variant).FieldFirst();
-}
-
-template<typename MEMBER_DEFINITION_TYPE>
 bool PDBSymbolVisitor<MEMBER_DEFINITION_TYPE>::UdtFieldContext::IsLast() const
 {
     return nextUdtField == std::get<SymbolUdt>(udtField->parent->variant).FieldLast();
@@ -529,7 +600,6 @@ bool PDBSymbolVisitor<MEMBER_DEFINITION_TYPE>::UdtFieldContext::IsLast() const
 template<typename MEMBER_DEFINITION_TYPE>
 bool PDBSymbolVisitor<MEMBER_DEFINITION_TYPE>::UdtFieldContext::GetNext()
 {
-    previousUdtField = currentUdtField;
     currentUdtField = nextUdtField;
     nextUdtField = std::get<SymbolUdt>(udtField->parent->variant).FindFieldNext(currentUdtField);
 

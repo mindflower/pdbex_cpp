@@ -48,6 +48,9 @@ protected:
     void OnUdtBegin(const Symbol& symbol) override;
     void OnUdtEnd(const Symbol& symbol) override;
 
+    bool OnNestedTypeBegin(const Symbol& symbol) override;
+    void OnNestedTypeEnd(const Symbol& symbol) override;
+
     void OnUdtFieldBegin(const SymbolUdtField& udtField) override;
     void OnUdtFieldEnd(const SymbolUdtField& udtField) override;
     void OnUdtField(const SymbolUdtField& udtField, UdtFieldDefinitionBase& memberDefinition) override;
@@ -64,6 +67,8 @@ protected:
 private:
     void Write(const char* format, ...);
     void WriteIndent();
+    void WriteIndent(DWORD depth);
+    void WriteDeclarationName(const Symbol& symbol);
     void WriteVariant(const VARIANT& v);
     void WriteUnnamedDataType(UdtKind kind);
     void WriteConstAndVolatile(const Symbol& symbol);
@@ -81,6 +86,13 @@ private:
     DWORD m_depth = 0;
     DWORD m_anonymousDataTypeCounter = 0;
     DWORD m_paddingMemberCounter = 0;
+
+    //
+    // Set when the type of the member being written was expanded in place, so
+    // that OnUdtField knows it still owes the closing "name;" and the size
+    // comment of that inlined definition.
+    //
+    bool m_memberTypeWasExpanded = false;
 
     mutable std::map<DWORD, std::string> m_correctedSymbolNames;
 
